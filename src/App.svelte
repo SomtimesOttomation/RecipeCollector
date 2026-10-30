@@ -4,6 +4,9 @@
   import Library from "./lib/Library.svelte";
   import RecipePage from "./lib/RecipePage.svelte";
   import Settings from "./lib/Settings.svelte";
+  import UpdateBanner from "./lib/UpdateBanner.svelte";
+  import { runCheck } from "./lib/updates.svelte";
+  import { autoCheckEnabled } from "./lib/api";
   import { applyTheme, loadTheme, isMac, type Theme } from "./lib/theme";
 
   type View = "library" | "settings";
@@ -15,6 +18,8 @@
 
   onMount(() => {
     document.documentElement.classList.add(isMac ? "mac" : "win");
+    // One quiet check a few seconds after start-up, unless turned off in Settings.
+    if (autoCheckEnabled()) setTimeout(runCheck, 4000);
   });
 
   function go(v: View) {
@@ -26,6 +31,7 @@
 <div class="shell">
   <Sidebar {view} onnavigate={go} />
   <main>
+    <UpdateBanner />
     {#if view === "settings"}
       <Settings bind:theme />
     {:else if openId !== null}
