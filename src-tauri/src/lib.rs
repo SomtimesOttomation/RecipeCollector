@@ -68,8 +68,9 @@ const BROWSER_LABEL: &str = "importer";
 
 /// Opens the page in an in-app browser window with an "Import this page" bar,
 /// for sites that block automatic downloads or build the recipe with JavaScript.
+/// Must be async: on Windows, creating a window from a synchronous command deadlocks.
 #[tauri::command]
-fn open_import_browser(url: String, app: AppHandle) -> Result<(), String> {
+async fn open_import_browser(url: String, app: AppHandle) -> Result<(), String> {
     let target: tauri::Url = import::normalize_url(&url).map_err(err)?.parse().map_err(err)?;
     if let Some(existing) = app.get_webview_window(BROWSER_LABEL) {
         existing.navigate(target).map_err(err)?;
