@@ -1,0 +1,10 @@
+[package]
+name = "receitas-core"
+version = "0.1.0"
+edition = "2021"
+description = "Library storage (and later recipe import) for Lolo's Receitas, kept free of UI code so it builds and tests anywhere."
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
