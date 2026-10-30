@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "import-browser",
+  "description": "In-app browser for importing from sites that block automatic downloads. Websites shown here can only send the page to the app.",
+  "windows": [
+    "importer"
+  ],
+  "remote": {
+    "urls": [
+      "https://*",
+      "https://*/*",
+      "http://*",
+      "http://*/*"
+    ]
+  },
+  "permissions": [
+    "allow-import-page-html"
+  ]
+}

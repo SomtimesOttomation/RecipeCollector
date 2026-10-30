@@ -23,9 +23,11 @@ pub enum Error {
     Db(#[from] rusqlite::Error),
     #[error("couldn't reach the site: {0}")]
     Network(String),
+    #[error("this site blocks automatic downloads")]
+    Blocked,
     #[error("that doesn't look like a web address")]
     BadUrl,
-    #[error("no recipe found on that page")]
+    #[error("couldn't find a recipe on that page")]
     NotARecipe,
     #[error("that pin doesn't link to a recipe site")]
     PinWithoutLink,

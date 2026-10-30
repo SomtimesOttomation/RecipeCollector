@@ -26,6 +26,9 @@ pub fn fetch_page(url: &str) -> Result<(String, String)> {
         .map_err(|e| Error::Network(e.to_string()))?;
     let status = resp.status();
     let final_url = resp.url().to_string();
+    if matches!(status.as_u16(), 401 | 403 | 429 | 503) {
+        return Err(Error::Blocked);
+    }
     if !status.is_success() {
         return Err(Error::Network(format!("the site answered {status}")));
     }
@@ -72,7 +75,7 @@ pub fn download_image(url: &str) -> Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-fn normalize_url(input: &str) -> Result<String> {
+pub fn normalize_url(input: &str) -> Result<String> {
     let t = input.trim();
     let with_scheme = if t.starts_with("http://") || t.starts_with("https://") { t.to_string() } else { format!("https://{t}") };
     url::Url::parse(&with_scheme).map(|u| u.to_string()).map_err(|_| Error::BadUrl)

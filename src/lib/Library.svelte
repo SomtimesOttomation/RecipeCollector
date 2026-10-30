@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { listRecipes, importRecipe, photoUrl, type RecipeSummary } from "./api";
+  import { onMount, onDestroy } from "svelte";
+  import { listRecipes, importRecipe, openImportBrowser, onBrowserImport, photoUrl, type RecipeSummary } from "./api";
 
   let { onopen }: { onopen: (id: number) => void } = $props();
 
@@ -8,23 +8,46 @@
   let url = $state("");
   let busy = $state(false);
   let error = $state("");
+  let failedUrl = $state("");
   let dragging = $state(false);
+  let unlisten: (() => void) | undefined;
 
   onMount(async () => {
     recipes = await listRecipes();
+    unlisten = await onBrowserImport((id) => {
+      error = "";
+      failedUrl = "";
+      url = "";
+      onopen(id);
+    });
   });
+
+  onDestroy(() => unlisten?.());
+
+  function explain(e: unknown): string {
+    const msg = String(e);
+    if (msg.includes("blocks automatic downloads"))
+      return "This site blocks automatic downloads. Open it in the built-in browser and import it from there.";
+    if (msg.includes("couldn't find a recipe"))
+      return "Couldn't find a recipe on that page automatically. Open it in the built-in browser and import it from there.";
+    if (msg.includes("pin doesn't link"))
+      return "That pin doesn't link to a recipe site. Open it in the built-in browser to find the recipe.";
+    return msg.charAt(0).toUpperCase() + msg.slice(1) + ".";
+  }
 
   async function runImport(link: string) {
     const target = link.trim();
     if (!target || busy) return;
     busy = true;
     error = "";
+    failedUrl = "";
     try {
       const id = await importRecipe(target);
       url = "";
       onopen(id);
     } catch (e) {
-      error = String(e);
+      error = explain(e);
+      if (!String(e).includes("web address")) failedUrl = target;
     } finally {
       busy = false;
     }
@@ -66,14 +89,19 @@
       placeholder="Paste a recipe link and press Enter"
       bind:value={url}
       disabled={busy}
-      oninput={() => (error = "")}
+      oninput={() => { error = ""; failedUrl = ""; }}
     />
     <button type="submit" disabled={busy || !url.trim()}>
       {#if busy}<span class="spinner"></span> Importing…{:else}Add recipe{/if}
     </button>
   </form>
   {#if error}
-    <p class="error">{error}</p>
+    <div class="error-box">
+      <p>{error}</p>
+      {#if failedUrl}
+        <button onclick={() => openImportBrowser(failedUrl)}>Open in browser to import</button>
+      {/if}
+    </div>
   {:else}
     <p class="hint">Works with most recipe sites and Pinterest pins. You can also drag a link onto the window.</p>
   {/if}
@@ -148,7 +176,27 @@
   }
   .add button:disabled { opacity: 0.6; cursor: default; }
   .hint { color: var(--text-2); margin: 10px 4px 0; font-size: 13px; }
-  .error { color: var(--accent); margin: 10px 4px 0; }
+  .error-box {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    max-width: 720px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+  }
+  .error-box p { margin: 0; flex: 1; min-width: 240px; line-height: 1.4; }
+  .error-box button {
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 8px 14px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    white-space: nowrap;
+  }
 
   .spinner {
     width: 14px;
