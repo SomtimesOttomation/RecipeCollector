@@ -77,6 +77,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install packages
         run: npm install --no-audit --no-fund
+      - name: Use version from VERSION file
+        run: node scripts/sync-version.mjs
       - name: Build installers
         shell: bash
         run: |

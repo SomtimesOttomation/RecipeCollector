@@ -13,6 +13,9 @@ const COMMANDS: &[&str] = &[
     "add_image_from_file",
     "set_hero",
     "remove_image",
+    "check_for_update",
+    "install_update",
+    "app_version",
 ];
 
 fn main() {
