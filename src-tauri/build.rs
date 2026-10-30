@@ -13,6 +13,7 @@ const COMMANDS: &[&str] = &[
     "add_image_from_file",
     "set_hero",
     "remove_image",
+    "print_page",
 ];
 
 fn main() {

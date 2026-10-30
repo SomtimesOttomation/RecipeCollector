@@ -167,7 +167,8 @@ pub fn run() {
             delete_recipe,
             add_image_from_file,
             set_hero,
-            remove_image
+            remove_image,
+            print_page
         ])
         .run(tauri::generate_context!())
         .expect("error while running Recipe Collector");
