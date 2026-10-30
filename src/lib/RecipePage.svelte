@@ -4,6 +4,7 @@
     getRecipe, updateRecipe, deleteRecipe, addImageFromFile, setHero, removeImage,
     pickPhoto, confirmDelete, openLink, photoUrl, inTauri, youtubeId, printPage, type Recipe, type Section,
   } from "./api";
+  import { lib, moveTo } from "./store.svelte";
 
   let { id, onclose }: { id: number; onclose: () => void } = $props();
 
@@ -168,6 +169,12 @@
     return { destroy: () => node.removeEventListener("input", fit) };
   }
 
+  let folderId = $derived(lib.recipes.find((r) => r.id === id)?.folder_id ?? null);
+  async function changeFolder(e: Event) {
+    const v = (e.target as HTMLSelectElement).value;
+    await moveTo(id, v === "" ? null : parseInt(v, 10));
+  }
+
   let hero = $derived.by(() => {
     const r = recipe as Recipe | null;
     return r ? (r.images.find((i) => i.is_hero) ?? r.images[0] ?? null) : null;
@@ -206,6 +213,14 @@
       <label>Prep <input type="number" min="0" bind:value={recipe.prep_min} placeholder="—" /> min</label>
       <label>Cook <input type="number" min="0" bind:value={recipe.cook_min} placeholder="—" /> min</label>
       <label>Total <input type="number" min="0" bind:value={recipe.total_min} placeholder="—" /> min</label>
+      {#if lib.folders.length > 0}
+        <label class="folder-pick">📁
+          <select value={folderId === null ? "" : String(folderId)} onchange={changeFolder}>
+            <option value="">Not in a folder</option>
+            {#each lib.folders as f (f.id)}<option value={String(f.id)}>{f.name}</option>{/each}
+          </select>
+        </label>
+      {/if}
       {#if recipe.source_url}
         <button class="link" onclick={() => recipe?.source_url && openLink(recipe.source_url)}>
           {recipe.site_name ?? "Source"} ↗
@@ -428,6 +443,9 @@
   }
   .facts label:first-child input { width: 110px; text-align: left; }
   .facts input::-webkit-inner-spin-button { display: none; }
+  .folder-pick select {
+    border: 0; background: none; outline: none; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;
+  }
   .link { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 13px; padding: 5px 8px; }
 
   .cards {

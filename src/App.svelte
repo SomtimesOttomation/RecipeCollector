@@ -7,6 +7,7 @@
   import UpdateBanner from "./lib/UpdateBanner.svelte";
   import { runCheck } from "./lib/updates.svelte";
   import { autoCheckEnabled } from "./lib/api";
+  import { refresh } from "./lib/store.svelte";
   import { applyTheme, loadTheme, isMac, type Theme } from "./lib/theme";
 
   type View = "library" | "settings";
@@ -26,17 +27,22 @@
     view = v;
     openId = null;
   }
+
+  function closeRecipe() {
+    openId = null;
+    refresh(); // titles, photos or folders may have changed
+  }
 </script>
 
 <div class="shell">
-  <Sidebar {view} onnavigate={go} />
+  <Sidebar {view} {openId} onnavigate={go} onopen={(id) => (openId = id)} />
   <main>
     <UpdateBanner />
     {#if view === "settings"}
       <Settings bind:theme />
     {:else if openId !== null}
       {#key openId}
-        <RecipePage id={openId} onclose={() => (openId = null)} />
+        <RecipePage id={openId} onclose={closeRecipe} />
       {/key}
     {:else}
       <Library onopen={(id) => (openId = id)} />

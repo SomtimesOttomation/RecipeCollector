@@ -1,4 +1,4 @@
-use recipe_core::{import, update, ImageInfo, Library, LibraryInfo, Recipe, RecipeSummary, LIBRARY_FOLDER_NAME};
+use recipe_core::{import, update, Folder, ImageInfo, Library, LibraryInfo, Recipe, RecipeSummary, LIBRARY_FOLDER_NAME};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
@@ -165,6 +165,31 @@ fn app_version(app: AppHandle) -> String {
 }
 
 #[tauri::command]
+fn list_folders(state: State<AppState>) -> Result<Vec<Folder>, String> {
+    state.with(|l| l.list_folders())
+}
+
+#[tauri::command]
+fn create_folder(name: String, state: State<AppState>) -> Result<Folder, String> {
+    state.with(|l| l.create_folder(&name))
+}
+
+#[tauri::command]
+fn rename_folder(id: i64, name: String, state: State<AppState>) -> Result<(), String> {
+    state.with(|l| l.rename_folder(id, &name))
+}
+
+#[tauri::command]
+fn delete_folder(id: i64, state: State<AppState>) -> Result<(), String> {
+    state.with(|l| l.delete_folder(id))
+}
+
+#[tauri::command]
+fn move_recipe(recipe_id: i64, folder_id: Option<i64>, state: State<AppState>) -> Result<(), String> {
+    state.with(|l| l.move_recipe(recipe_id, folder_id))
+}
+
+#[tauri::command]
 fn get_recipe(id: i64, state: State<AppState>) -> Result<Recipe, String> {
     state.with(|l| l.get_recipe(id))
 }
@@ -224,7 +249,12 @@ pub fn run() {
             print_page,
             check_for_update,
             install_update,
-            app_version
+            app_version,
+            list_folders,
+            create_folder,
+            rename_folder,
+            delete_folder,
+            move_recipe
         ])
         .run(tauri::generate_context!())
         .expect("error while running Recipe Collector");
