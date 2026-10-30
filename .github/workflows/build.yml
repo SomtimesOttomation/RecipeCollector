@@ -17,19 +17,28 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Core library tests
         run: cargo test -p receitas-core
-      - name: UI type check and build
+      - name: Install packages
+        run: npm install --no-audit --no-fund
+      - name: UI type check
+        shell: bash
         run: |
-          npm install --no-audit --no-fund
-          npm run check
-          npm run build
+          set -o pipefail
+          npx svelte-check --tsconfig ./tsconfig.json --output machine | tee check.txt || {
+            grep -E " (ERROR|WARNING) " check.txt | while read -r _ level file pos msg; do
+              echo "::error file=$file::$level $pos $msg"
+            done
+            exit 1
+          }
+      - name: UI build
+        run: npm run build
 
   build:
     name: Build ${{ matrix.name }}
@@ -51,8 +60,8 @@ jobs:
               target/universal-apple-darwin/release/bundle/dmg/*.dmg
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
