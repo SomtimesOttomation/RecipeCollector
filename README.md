@@ -1,0 +1,2 @@
+# LolosReceitas
+Recipe Collector
