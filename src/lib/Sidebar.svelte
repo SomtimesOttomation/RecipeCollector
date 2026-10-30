@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { createFolder, renameFolder, deleteFolder, confirmDeleteFolder } from "./api";
+  import { createFolder, renameFolder, deleteFolder, confirmDeleteFolder, renameTag, deleteTag, confirmDeleteTag } from "./api";
   import { lib, refresh, inScope, moveTo, draggedRecipe, isRecipeDrag, RECIPE_DRAG, type Scope } from "./store.svelte";
 
   type View = "library" | "settings";
@@ -33,6 +33,35 @@
   let editName = $state("");
   let menuFor = $state<number | null>(null);
   let adding = $state(false);
+  let tagMenu = $state<number | null>(null);
+  let editingTag = $state<number | null>(null);
+  let tagName = $state("");
+
+  async function startTagRename(id: number, name: string) {
+    tagMenu = null;
+    editingTag = id;
+    tagName = name;
+    await tick();
+    document.querySelector<HTMLInputElement>(".rename-tag")?.select();
+  }
+  async function finishTagRename() {
+    if (editingTag === null) return;
+    const id = editingTag;
+    const old = lib.tags.find((t) => t.id === id)?.name;
+    editingTag = null;
+    if (tagName.trim() && tagName.trim() !== old) {
+      await renameTag(id, tagName);
+      if (lib.scope.kind === "tag" && old && lib.scope.name.toLowerCase() === old.toLowerCase()) lib.scope = { kind: "tag", name: tagName.trim() };
+      await refresh();
+    }
+  }
+  async function removeTag(id: number, name: string) {
+    tagMenu = null;
+    if (await confirmDeleteTag(name)) {
+      await deleteTag(id);
+      await refresh();
+    }
+  }
   let newName = $state("");
 
   function select(s: Scope) {
@@ -42,7 +71,9 @@
   function isActive(s: Scope) {
     if (view !== "library" || openId !== null) return false;
     const c = lib.scope;
-    return c.kind === s.kind && (c.kind !== "folder" || (s.kind === "folder" && c.id === s.id));
+    if (c.kind === "folder") return s.kind === "folder" && c.id === s.id;
+    if (c.kind === "tag") return s.kind === "tag" && c.name.toLowerCase() === s.name.toLowerCase();
+    return c.kind === s.kind;
   }
 
   // ---- drag and drop ----
@@ -113,7 +144,7 @@
   let unfiled = $derived(lib.recipes.filter((r) => inScope(r, { kind: "unfiled" })));
 </script>
 
-<svelte:window onclick={() => (menuFor = null)} ondragend={() => (dropTarget = null)} />
+<svelte:window onclick={() => { menuFor = null; tagMenu = null; }} ondragend={() => (dropTarget = null)} />
 
 <nav>
   <div class="drag" data-tauri-drag-region></div>
@@ -211,6 +242,38 @@
       </div>
     {:else if lib.folders.length === 0}
       <button class="hint" onclick={startAdd}>Create a folder, then drag recipes onto it</button>
+    {/if}
+
+    {#if lib.tags.length > 0}
+      <div class="section"><span>Tags</span></div>
+      {#each lib.tags as t (t.id)}
+        <div class="row-wrap tag-row">
+          {#if editingTag === t.id}
+            <input
+              class="rename rename-tag"
+              bind:value={tagName}
+              onblur={finishTagRename}
+              onkeydown={(e) => keys(e, finishTagRename, () => (editingTag = null))}
+            />
+          {:else}
+            <button
+              class="row"
+              class:active={isActive({ kind: "tag", name: t.name })}
+              onclick={() => select({ kind: "tag", name: t.name })}
+              ondblclick={() => startTagRename(t.id, t.name)}
+            >
+              <span class="ico">#</span><span class="label">{t.name}</span><span class="count">{t.recipe_count}</span>
+            </button>
+            <button class="more" title="Tag options" onclick={(e) => { e.stopPropagation(); tagMenu = tagMenu === t.id ? null : t.id; }}>⋯</button>
+          {/if}
+          {#if tagMenu === t.id}
+            <div class="menu" role="menu">
+              <button role="menuitem" onclick={() => startTagRename(t.id, t.name)}>Rename</button>
+              <button role="menuitem" class="danger" onclick={() => removeTag(t.id, t.name)}>Delete tag</button>
+            </div>
+          {/if}
+        </div>
+      {/each}
     {/if}
 
     {#if lib.folders.length === 0 && lib.recipes.length > 0}
@@ -314,4 +377,6 @@
   .item.active { color: var(--accent); font-weight: 600; }
   .empty { padding: 3px 10px; font-size: 12px; color: var(--text-2); opacity: 0.6; }
   .settings { margin-top: 8px; flex-shrink: 0; }
+  .tag-row { padding-left: 18px; }
+  .tag-row .ico { opacity: 0.7; }
 </style>

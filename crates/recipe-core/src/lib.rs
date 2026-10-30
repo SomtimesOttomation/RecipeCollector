@@ -57,6 +57,14 @@ pub struct RecipeSummary {
     pub hero_image: Option<String>,
     /// The folder the recipe is in; none means not in a folder.
     pub folder_id: Option<i64>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Tag {
+    pub id: i64,
+    pub name: String,
+    pub recipe_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -89,6 +97,8 @@ pub struct Recipe {
     pub notes: Option<String>,
     #[serde(default)]
     pub video_url: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub ingredients: Vec<Section>,
     pub steps: Vec<Section>,
     #[serde(default)]
@@ -147,7 +157,21 @@ impl Library {
                 site_name,
                 hero_image: file.map(|f| self.images_dir(id).join(f).display().to_string()),
                 folder_id,
+                tags: vec![],
             });
+        }
+        // All tags in one query, then shared out.
+        let mut tag_stmt = self.conn.prepare(
+            "SELECT rt.recipe_id, t.name FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id ORDER BY t.name COLLATE NOCASE",
+        )?;
+        let pairs = tag_stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        let mut by_recipe: std::collections::HashMap<i64, Vec<String>> = Default::default();
+        for p in pairs {
+            let (rid, name) = p?;
+            by_recipe.entry(rid).or_default().push(name);
+        }
+        for r in &mut out {
+            r.tags = by_recipe.remove(&r.id).unwrap_or_default();
         }
         Ok(out)
     }
@@ -172,6 +196,7 @@ impl Library {
             "INSERT INTO raw_imports (recipe_id, json_ld) VALUES (?1, ?2)",
             params![id, p.json_ld],
         )?;
+        write_tags(&tx, id, &p.tags)?;
         tx.commit()?;
         Ok(id)
     }
@@ -228,6 +253,7 @@ impl Library {
         }
 
         r.images = self.images_of(id)?;
+        r.tags = self.tags_of(id)?;
         Ok(r)
     }
 
@@ -255,12 +281,14 @@ impl Library {
         tx.execute("DELETE FROM ingredient_sections WHERE recipe_id=?1", [r.id])?;
         tx.execute("DELETE FROM steps WHERE recipe_id=?1", [r.id])?;
         write_sections(&tx, r.id, &r.ingredients, &r.steps)?;
+        write_tags(&tx, r.id, &r.tags)?;
         tx.commit()?;
         Ok(())
     }
 
     pub fn delete_recipe(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM recipes WHERE id=?1", [id])?;
+        self.conn.execute(DROP_UNUSED_TAGS, [])?;
         let dir = self.images_dir(id);
         if dir.exists() {
             std::fs::remove_dir_all(dir)?;
@@ -397,10 +425,72 @@ impl Library {
         Ok(())
     }
 
+    // ---------- Tags ----------
+
+    fn tags_of(&self, recipe_id: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.name FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id WHERE rt.recipe_id = ?1 ORDER BY t.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([recipe_id], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn list_tags(&self) -> Result<Vec<Tag>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.id, t.name, COUNT(rt.recipe_id) FROM tags t
+             LEFT JOIN recipe_tags rt ON rt.tag_id = t.id
+             GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| Ok(Tag { id: r.get(0)?, name: r.get(1)?, recipe_count: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Renames a tag everywhere. Renaming onto an existing tag merges the two.
+    pub fn rename_tag(&mut self, id: i64, name: &str) -> Result<()> {
+        let name = parse::normalize_tags([name.to_string()], 1).pop().ok_or(Error::NotFound)?;
+        let tx = self.conn.transaction()?;
+        let existing: Option<i64> = tx
+            .query_row("SELECT id FROM tags WHERE name = ?1 COLLATE NOCASE AND id != ?2", params![name, id], |r| r.get(0))
+            .optional()?;
+        match existing {
+            Some(other) => {
+                tx.execute("INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) SELECT recipe_id, ?2 FROM recipe_tags WHERE tag_id = ?1", params![id, other])?;
+                tx.execute("DELETE FROM tags WHERE id = ?1", [id])?;
+            }
+            None => {
+                if tx.execute("UPDATE tags SET name = ?2 WHERE id = ?1", params![id, name])? == 0 {
+                    return Err(Error::NotFound);
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Removes a tag from every recipe.
+    pub fn delete_tag(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM tags WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
     fn touch(&self, recipe_id: i64) -> Result<()> {
         self.conn.execute("UPDATE recipes SET updated_at=datetime('now') WHERE id=?1", [recipe_id])?;
         Ok(())
     }
+}
+
+const DROP_UNUSED_TAGS: &str = "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM recipe_tags)";
+
+/// Replaces a recipe's tags, creating new ones as needed and tidying away unused ones.
+fn write_tags(tx: &rusqlite::Transaction, recipe_id: i64, tags: &[String]) -> Result<()> {
+    tx.execute("DELETE FROM recipe_tags WHERE recipe_id = ?1", [recipe_id])?;
+    for name in parse::normalize_tags(tags.iter().cloned(), 40) {
+        tx.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
+        let tag_id: i64 = tx.query_row("SELECT id FROM tags WHERE name = ?1 COLLATE NOCASE", [&name], |r| r.get(0))?;
+        tx.execute("INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?1, ?2)", params![recipe_id, tag_id])?;
+    }
+    tx.execute(DROP_UNUSED_TAGS, [])?;
+    Ok(())
 }
 
 fn clean_folder_name(name: &str) -> String {
@@ -696,6 +786,36 @@ mod tests {
         assert_eq!(lib.list_folders().unwrap().len(), 1);
         assert_eq!(lib.list_recipes().unwrap().len(), 2, "recipes survive deleting their folder");
         assert!(lib.list_recipes().unwrap().iter().all(|r| r.folder_id.is_none()));
+    }
+
+    #[test]
+    fn tags() {
+        let mut lib = Library::open(temp_root("tags")).unwrap();
+        let mut p = sample();
+        p.tags = vec!["Soup".into(), "Portuguese".into()];
+        let a = lib.save_parsed(&p).unwrap();
+        p.tags = vec!["soup".into(), "Winter".into()];
+        let b = lib.save_parsed(&p).unwrap();
+
+        let names = |lib: &Library| lib.list_tags().unwrap().into_iter().map(|t| (t.name, t.recipe_count)).collect::<Vec<_>>();
+        assert_eq!(names(&lib), vec![("Portuguese".into(), 1), ("Soup".into(), 2), ("Winter".into(), 1)]);
+        assert_eq!(lib.get_recipe(a).unwrap().tags, vec!["Portuguese", "Soup"]);
+        assert_eq!(lib.list_recipes().unwrap().iter().find(|r| r.id == b).unwrap().tags, vec!["Soup", "Winter"]);
+
+        // Editing a recipe's tags; unused tags disappear.
+        let mut r = lib.get_recipe(a).unwrap();
+        r.tags = vec!["Soup".into(), "Comfort food".into()];
+        lib.update_recipe(&r).unwrap();
+        assert_eq!(names(&lib), vec![("Comfort food".into(), 1), ("Soup".into(), 2), ("Winter".into(), 1)]);
+
+        // Renaming onto an existing tag merges them.
+        let winter = lib.list_tags().unwrap().into_iter().find(|t| t.name == "Winter").unwrap();
+        lib.rename_tag(winter.id, "comfort food").unwrap();
+        assert_eq!(names(&lib), vec![("Comfort food".into(), 2), ("Soup".into(), 2)]);
+
+        let soup = lib.list_tags().unwrap().into_iter().find(|t| t.name == "Soup").unwrap();
+        lib.delete_tag(soup.id).unwrap();
+        assert_eq!(lib.get_recipe(b).unwrap().tags, vec!["Comfort food"]);
     }
 
     #[test]

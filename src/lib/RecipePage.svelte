@@ -169,6 +169,22 @@
     return { destroy: () => node.removeEventListener("input", fit) };
   }
 
+  let newTag = $state("");
+  function addTag() {
+    const t = newTag.trim().replace(/^#/, "");
+    if (!recipe || !t) return;
+    if (!recipe.tags.some((x) => x.toLowerCase() === t.toLowerCase())) recipe.tags.push(t);
+    newTag = "";
+  }
+  function tagKey(e: KeyboardEvent) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addTag();
+    } else if (e.key === "Backspace" && !newTag && recipe?.tags.length) {
+      recipe.tags.pop();
+    }
+  }
+
   let folderId = $derived(lib.recipes.find((r) => r.id === id)?.folder_id ?? null);
   async function changeFolder(e: Event) {
     const v = (e.target as HTMLSelectElement).value;
@@ -226,6 +242,24 @@
           {recipe.site_name ?? "Source"} ↗
         </button>
       {/if}
+    </div>
+    <div class="tags">
+      {#each recipe.tags as t, i (t)}
+        <span class="tag">#{t}<button title="Remove tag" onclick={() => recipe?.tags.splice(i, 1)}>✕</button></span>
+      {/each}
+      <input
+        class="tag-input"
+        list="all-tags"
+        bind:value={newTag}
+        onkeydown={tagKey}
+        onblur={addTag}
+        placeholder={recipe.tags.length ? "Add tag" : "Add tags, e.g. Dessert, Quick"}
+      />
+      <datalist id="all-tags">
+        {#each lib.tags.filter((t) => !recipe?.tags.some((x) => x.toLowerCase() === t.name.toLowerCase())) as t (t.id)}
+          <option value={t.name}></option>
+        {/each}
+      </datalist>
     </div>
   </header>
 
@@ -443,6 +477,17 @@
   }
   .facts label:first-child input { width: 110px; text-align: left; }
   .facts input::-webkit-inner-spin-button { display: none; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; padding: 3px 6px 3px 10px;
+    border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  }
+  .tag button { border: 0; background: none; color: inherit; opacity: 0.6; font-size: 10px; padding: 2px 3px; }
+  .tag button:hover { opacity: 1; }
+  .tag-input {
+    border: 0; background: none; outline: none; font: inherit; font-size: 13px; min-width: 150px; padding: 4px 2px;
+    color: var(--text);
+  }
   .folder-pick select {
     border: 0; background: none; outline: none; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;
   }

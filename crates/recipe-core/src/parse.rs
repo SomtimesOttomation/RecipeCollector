@@ -41,6 +41,8 @@ pub struct ParsedRecipe {
     pub images: Vec<String>,
     /// A YouTube link for the recipe, when the page has one.
     pub video_url: Option<String>,
+    /// Suggested tags: the site's category, cuisine, diet and a few keywords.
+    pub tags: Vec<String>,
     pub json_ld: Option<String>,
     pub method: ParseMethod,
 }
@@ -81,6 +83,9 @@ pub fn parse_page(html: &str, page_url: &str) -> ParsedRecipe {
         .or_else(|| meta(&doc, "og:site_name"))
         .or_else(|| base.as_ref().and_then(|u| u.host_str()).map(|h| h.trim_start_matches("www.").to_string()));
     r.source_url = Some(page_url.to_string());
+    if matches!(r.total_min, Some(m) if m <= 30) && !r.tags.iter().any(|t| t.eq_ignore_ascii_case("quick")) {
+        r.tags.push("Quick".to_string());
+    }
     if r.video_url.is_none() {
         r.video_url = find_youtube_in_page(html);
     }
@@ -173,8 +178,58 @@ fn recipe_from_value(v: &Value) -> ParsedRecipe {
         steps: instructions_of(v.get("recipeInstructions")),
         images: images_of(v.get("image")),
         video_url: v.get("video").and_then(video_of),
+        tags: tags_of(v),
         ..Default::default()
     }
+}
+
+/// Tags from the recipe data: category and cuisine first, then diets, then a few keywords.
+fn tags_of(v: &Value) -> Vec<String> {
+    let mut raw: Vec<String> = vec![];
+    for key in ["recipeCategory", "recipeCuisine"] {
+        raw.extend(split_list(v.get(key)));
+    }
+    for diet in string_list(v.get("suitableForDiet")).into_iter().chain(v.get("suitableForDiet").and_then(Value::as_str).map(str::to_string)) {
+        // "https://schema.org/VegetarianDiet" -> "Vegetarian"
+        let name = diet.rsplit('/').next().unwrap_or("").trim_end_matches("Diet").to_string();
+        let spaced: String = name.chars().enumerate().flat_map(|(i, c)| {
+            if i > 0 && c.is_uppercase() { vec![' ', c] } else { vec![c] }
+        }).collect();
+        if !spaced.is_empty() {
+            raw.push(spaced);
+        }
+    }
+    raw.extend(split_list(v.get("keywords")).into_iter().take(5));
+    normalize_tags(raw, 8)
+}
+
+fn split_list(v: Option<&Value>) -> Vec<String> {
+    match v {
+        Some(Value::String(s)) => s.split([',', ';', '|']).map(|t| t.to_string()).collect(),
+        Some(Value::Array(a)) => a.iter().filter_map(text_of).flat_map(|s| s.split(',').map(str::to_string).collect::<Vec<_>>()).collect(),
+        _ => vec![],
+    }
+}
+
+/// Trims, drops junk and duplicates (ignoring case), capitalises, and keeps at most `max`.
+pub fn normalize_tags(raw: impl IntoIterator<Item = String>, max: usize) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for t in raw {
+        let t = clean(&t);
+        let t = t.trim_matches(|c: char| c == '#' || c.is_whitespace());
+        if t.is_empty() || t.chars().count() > 30 || t.starts_with("http") || t.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let mut chars = t.chars();
+        let tag: String = chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
+        if !out.iter().any(|o| o.eq_ignore_ascii_case(&tag)) {
+            out.push(tag);
+        }
+        if out.len() >= max {
+            break;
+        }
+    }
+    out
 }
 
 fn video_of(v: &Value) -> Option<String> {
@@ -790,6 +845,17 @@ mod tests {
         assert!(report.contains("WP Recipe Maker"));
         assert!(report.contains("Ingredients found: 1"));
         assert!(report.contains("- water"));
+    }
+
+    #[test]
+    fn tags_from_recipe_data() {
+        let html = r#"<script type="application/ld+json">{"@type":"Recipe","name":"Pastel de nata",
+          "recipeIngredient":["x"],"totalTime":"PT25M",
+          "recipeCategory":["Dessert","dessert"],"recipeCuisine":"Portuguese",
+          "suitableForDiet":"https://schema.org/VegetarianDiet",
+          "keywords":"custard tart, pastel de nata, #baking, https://spam.example, 2024, a very long keyword phrase that goes on and on"}</script>"#;
+        let r = parse_page(html, "https://x.com/");
+        assert_eq!(r.tags, vec!["Dessert", "Portuguese", "Vegetarian", "Custard tart", "Pastel de nata", "Baking", "Quick"]);
     }
 
     #[test]

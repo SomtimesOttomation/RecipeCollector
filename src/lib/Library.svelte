@@ -158,6 +158,12 @@
             {#if r.total_min}<span class="chip">{time(r.total_min)}</span>{/if}
             {#if r.site_name}<span class="site">{r.site_name}</span>{/if}
           </div>
+          {#if r.tags.length}
+            <div class="card-tags">
+              {#each r.tags.slice(0, 3) as t}<span>#{t}</span>{/each}
+              {#if r.tags.length > 3}<span>+{r.tags.length - 3}</span>{/if}
+            </div>
+          {/if}
         </div>
       </button>
     {/each}
@@ -294,4 +300,5 @@
     color: var(--accent);
   }
   .site { font-size: 12px; color: var(--text-2); }
+  .card-tags { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; font-size: 11.5px; color: var(--text-2); }
 </style>

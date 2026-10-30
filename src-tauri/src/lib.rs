@@ -1,4 +1,4 @@
-use recipe_core::{import, update, Folder, ImageInfo, Library, LibraryInfo, Recipe, RecipeSummary, LIBRARY_FOLDER_NAME};
+use recipe_core::{import, update, Folder, ImageInfo, Tag, Library, LibraryInfo, Recipe, RecipeSummary, LIBRARY_FOLDER_NAME};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
@@ -190,6 +190,21 @@ fn move_recipe(recipe_id: i64, folder_id: Option<i64>, state: State<AppState>) -
 }
 
 #[tauri::command]
+fn list_tags(state: State<AppState>) -> Result<Vec<Tag>, String> {
+    state.with(|l| l.list_tags())
+}
+
+#[tauri::command]
+fn rename_tag(id: i64, name: String, state: State<AppState>) -> Result<(), String> {
+    state.with(|l| l.rename_tag(id, &name))
+}
+
+#[tauri::command]
+fn delete_tag(id: i64, state: State<AppState>) -> Result<(), String> {
+    state.with(|l| l.delete_tag(id))
+}
+
+#[tauri::command]
 fn get_recipe(id: i64, state: State<AppState>) -> Result<Recipe, String> {
     state.with(|l| l.get_recipe(id))
 }
@@ -254,7 +269,10 @@ pub fn run() {
             create_folder,
             rename_folder,
             delete_folder,
-            move_recipe
+            move_recipe,
+            list_tags,
+            rename_tag,
+            delete_tag
         ])
         .run(tauri::generate_context!())
         .expect("error while running Recipe Collector");
