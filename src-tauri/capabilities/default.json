@@ -21,6 +21,9 @@
     "allow-delete-recipe",
     "allow-add-image-from-file",
     "allow-set-hero",
-    "allow-remove-image"
+    "allow-remove-image",
+    "allow-check-for-update",
+    "allow-install-update",
+    "allow-app-version"
   ]
 }

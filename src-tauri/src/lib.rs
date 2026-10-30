@@ -1,4 +1,4 @@
-use recipe_core::{import, ImageInfo, Library, LibraryInfo, Recipe, RecipeSummary, LIBRARY_FOLDER_NAME};
+use recipe_core::{import, update, ImageInfo, Library, LibraryInfo, Recipe, RecipeSummary, LIBRARY_FOLDER_NAME};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
@@ -107,6 +107,46 @@ async fn import_page_html(html: String, url: String, app: AppHandle) -> Result<i
 }
 
 #[tauri::command]
+async fn check_for_update(app: AppHandle) -> Result<update::UpdateStatus, String> {
+    let current = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || update::check(&current)).await.map_err(err)
+}
+
+/// Downloads and verifies the installer, starts it, then closes the app so files can be replaced.
+#[tauri::command]
+async fn install_update(installer_url: String, checksum_url: Option<String>, app: AppHandle) -> Result<(), String> {
+    let dir = std::env::temp_dir().join("RecipeCollector-update");
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        update::download_installer(&installer_url, checksum_url.as_deref(), &dir)
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new(&path).spawn().map_err(err)?;
+        app.exit(0);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Opens the disk image; the user drags the new app over the old one.
+        std::process::Command::new("open").arg(&path).spawn().map_err(err)?;
+        let _ = &app;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = (&app, &path);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
 fn get_recipe(id: i64, state: State<AppState>) -> Result<Recipe, String> {
     state.with(|l| l.get_recipe(id))
 }
@@ -161,7 +201,10 @@ pub fn run() {
             delete_recipe,
             add_image_from_file,
             set_hero,
-            remove_image
+            remove_image,
+            check_for_update,
+            install_update,
+            app_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running Recipe Collector");

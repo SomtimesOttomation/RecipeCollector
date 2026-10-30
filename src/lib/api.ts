@@ -163,3 +163,47 @@ export async function onBrowserImport(handler: (id: number) => void): Promise<()
   const { listen } = await import("@tauri-apps/api/event");
   return listen<number>("recipe-imported", (e) => handler(e.payload));
 }
+
+export type UpdateStatus =
+  | { state: "up_to_date"; current: string; latest: string }
+  | {
+      state: "available";
+      current: string;
+      latest: string;
+      notes: string;
+      page_url: string;
+      installer_url: string | null;
+      checksum_url: string | null;
+    }
+  | { state: "unavailable"; current: string; reason: string };
+
+export async function appVersion(): Promise<string> {
+  if (!inTauri) return "0.1.0";
+  return invoke<string>("app_version");
+}
+
+export async function checkForUpdate(): Promise<UpdateStatus> {
+  if (!inTauri) return { state: "unavailable", current: "0.1.0", reason: "Updates are checked in the installed app." };
+  return invoke<UpdateStatus>("check_for_update");
+}
+
+export async function installUpdate(installerUrl: string, checksumUrl: string | null): Promise<void> {
+  if (!inTauri) return;
+  return invoke("install_update", { installerUrl, checksumUrl });
+}
+
+const AUTO_KEY = "rc.autoUpdateCheck";
+export function autoCheckEnabled(): boolean {
+  try {
+    return localStorage.getItem(AUTO_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+export function setAutoCheck(on: boolean) {
+  try {
+    localStorage.setItem(AUTO_KEY, on ? "on" : "off");
+  } catch {}
+}
+
+export const isMacPlatform = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);

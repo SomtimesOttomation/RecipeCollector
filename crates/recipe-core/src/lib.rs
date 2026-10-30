@@ -5,6 +5,7 @@
 
 pub mod import;
 pub mod parse;
+pub mod update;
 
 use parse::{ParsedRecipe, Section};
 use rusqlite::{params, Connection, OptionalExtension};
