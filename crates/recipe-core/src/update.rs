@@ -76,7 +76,8 @@ impl Platform {
 
 /// "v1.10.2" / "1.10.2" into comparable numbers; anything after '-' or '+' is ignored.
 pub fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
-    let core = v.trim().trim_start_matches(['v', 'V']).split(['-', '+']).next()?;
+    // Tolerates "v1.2.3", "V1.2.3", "1.2.3" and slips like "v.1.2.3".
+    let core = v.trim().trim_start_matches(['v', 'V', '.', ' ']).split(['-', '+']).next()?;
     let mut parts = core.split('.').map(|p| p.parse::<u64>());
     let major = parts.next()?.ok()?;
     let minor = parts.next().unwrap_or(Ok(0)).ok()?;
@@ -100,7 +101,7 @@ fn client() -> Result<reqwest::blocking::Client> {
 }
 
 fn status_from(release: GhRelease, current: &str, platform: Platform) -> UpdateStatus {
-    let latest = release.tag_name.trim_start_matches(['v', 'V']).to_string();
+    let latest = release.tag_name.trim().trim_start_matches(['v', 'V', '.', ' ']).to_string();
     if !is_newer(&latest, current) {
         return UpdateStatus::UpToDate { current: current.to_string(), latest };
     }
@@ -208,6 +209,8 @@ mod tests {
         assert!(!is_newer("v0.1.0", "0.1.0"));
         assert!(!is_newer("v0.1.0", "0.2.0"));
         assert!(!is_newer("nonsense", "0.1.0"));
+        assert_eq!(parse_version("v.0.2.0"), Some((0, 2, 0)));
+        assert!(is_newer("v.0.3.0", "0.2.0"));
     }
 
     #[test]
