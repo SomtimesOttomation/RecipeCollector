@@ -1,2 +1,30 @@
-# RecipeCollector
-Recipe Collector
+# Recipe Collector
+
+A desktop recipe collector for Windows and macOS. Paste a recipe link and it becomes a clean, fully editable recipe page with an ingredients card, a steps card and the photos saved locally.
+
+Built with [Tauri 2](https://tauri.app) (Rust) and Svelte.
+
+## Status
+
+Early development. The app shell, library storage and Windows/macOS builds are in place; recipe import is next.
+
+## Download
+
+Installers are attached to each [release](../../releases):
+
+- **Windows:** `.msi` or setup `.exe`. If SmartScreen appears, choose **More info → Run anyway**.
+- **macOS:** `.dmg`. The app isn't notarized yet: on first launch, open **System Settings → Privacy & Security** and click **Open Anyway**.
+
+## Your recipes
+
+Recipes are stored in `Documents/Recipe Collector` (a `library.db` file plus an `images` folder), so they're easy to back up.
+
+## Building from source
+
+Needs Node.js 22+ and Rust (plus Visual Studio Build Tools on Windows, or Xcode Command Line Tools on macOS).
+
+```
+npm install
+npm run tauri dev     # run the app
+npm run tauri build   # make installers
+```

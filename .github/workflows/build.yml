@@ -1,0 +1,112 @@
+name: Build
+
+# Runs on every push (any branch) so each change is tested and built for
+# Windows and macOS. When a release is published, the installers and their
+# .sha256 files are attached to that release.
+on:
+  push:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Core library tests
+        run: cargo test -p recipe-core
+      - name: Install packages
+        run: npm install --no-audit --no-fund
+      - name: UI type check
+        shell: bash
+        run: |
+          set -o pipefail
+          npx svelte-check --tsconfig ./tsconfig.json --output machine | tee check.txt || {
+            grep -E " (ERROR|WARNING) " check.txt | while read -r _ level file pos msg; do
+              echo "::error file=$file::$level $pos $msg"
+            done
+            exit 1
+          }
+      - name: UI build
+        run: npm run build
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: ""
+            bundles: |
+              target/release/bundle/msi/*.msi
+              target/release/bundle/nsis/*.exe
+          - name: macOS
+            os: macos-latest
+            args: "--target universal-apple-darwin"
+            bundles: |
+              target/universal-apple-darwin/release/bundle/dmg/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install packages
+        run: npm install --no-audit --no-fund
+      - name: Build installers
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tauri build ${{ matrix.args }} 2>&1 | tee build.log || {
+            # Surface the end of the log as annotations so failures are readable anywhere.
+            msg=$( (grep -iE -A4 "error|failed|warning: unused" build.log || tail -n 40 build.log) | sed 's/\x1b\[[0-9;]*m//g' | tail -n 60 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=Build failed::$msg"
+            exit 1
+          }
+      - name: Collect installers and checksums
+        shell: bash
+        run: |
+          mkdir -p out
+          # Copy every installer, dropping the apostrophe and space from the file name.
+          find target -path '*/bundle/*' -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \) | while IFS= read -r f; do
+            name=$(basename "$f"); name=${name//\'/}; name=${name// /}
+            cp "$f" "out/$name"
+          done
+          cd out
+          count=$(ls | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No installers found. Bundle folders:"
+            find ../target -type d -name bundle -exec find {} -maxdepth 2 \; | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          fi
+          for f in *; do
+            if command -v sha256sum >/dev/null; then sha256sum "$f" > "$f.sha256"; else shasum -a 256 "$f" > "$f.sha256"; fi
+          done
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RecipeCollector-${{ matrix.name }}
+          path: out/*
+      - name: Attach to release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" out/* --clobber
