@@ -164,6 +164,15 @@ export async function onBrowserImport(handler: (id: number) => void): Promise<()
   return listen<number>("recipe-imported", (e) => handler(e.payload));
 }
 
+/** Opens the system print dialog for the current page. */
+export async function printPage(): Promise<void> {
+  if (!inTauri) {
+    window.print();
+    return;
+  }
+  return invoke("print_page");
+}
+
 export type UpdateStatus =
   | { state: "up_to_date"; current: string; latest: string }
   | {

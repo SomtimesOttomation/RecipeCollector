@@ -106,6 +106,12 @@ async fn import_page_html(html: String, url: String, app: AppHandle) -> Result<i
     Ok(id)
 }
 
+/// System print dialog for the main window (window.print() doesn't work in every webview).
+#[tauri::command]
+async fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(err)
+}
+
 /// Called by the browser bar's "Save for analysis" button: saves the page and an import
 /// report into the library's debug folder and shows the report in the file manager.
 #[tauri::command]
@@ -215,6 +221,7 @@ pub fn run() {
             add_image_from_file,
             set_hero,
             remove_image,
+            print_page,
             check_for_update,
             install_update,
             app_version

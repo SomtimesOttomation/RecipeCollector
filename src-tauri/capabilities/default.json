@@ -23,6 +23,7 @@
     "allow-add-image-from-file",
     "allow-set-hero",
     "allow-remove-image",
+    "allow-print-page",
     "allow-check-for-update",
     "allow-install-update",
     "allow-app-version"

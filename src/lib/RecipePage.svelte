@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import {
     getRecipe, updateRecipe, deleteRecipe, addImageFromFile, setHero, removeImage,
-    pickPhoto, confirmDelete, openLink, photoUrl, inTauri, type Recipe, type Section,
+    pickPhoto, confirmDelete, openLink, photoUrl, inTauri, printPage, type Recipe, type Section,
   } from "./api";
 
   let { id, onclose }: { id: number; onclose: () => void } = $props();
@@ -182,6 +182,7 @@
     <span class="status">
       {#if status === "saving"}Saving…{:else if status === "saved"}Saved{:else if status === "error"}<span class="error">{saveError}</span>{/if}
     </span>
+    <button class="ghost" onclick={async () => { await flush(); printPage(); }}>Print</button>
     <button class="ghost danger" onclick={remove}>Delete</button>
   </div>
 
@@ -303,11 +304,63 @@
       {/if}
     </div>
   </section>
+
+  <!-- Clean, read-only copy used only when printing. -->
+  <article class="print-view" aria-hidden="true">
+    <h1>{recipe.title}</h1>
+    {#if recipe.description}<p class="p-desc">{recipe.description}</p>{/if}
+    <p class="p-facts">
+      {#if recipe.servings}<span>Serves {recipe.servings}</span>{/if}
+      {#if recipe.prep_min}<span>Prep {recipe.prep_min} min</span>{/if}
+      {#if recipe.cook_min}<span>Cook {recipe.cook_min} min</span>{/if}
+      {#if recipe.total_min}<span>Total {recipe.total_min} min</span>{/if}
+    </p>
+    {#if hero}<img class="p-hero" src={photoUrl(hero.path)} alt="" />{/if}
+    <div class="p-cols">
+      <section>
+        <h2>Ingredients</h2>
+        {#each recipe.ingredients as sec}
+          {#if sec.title}<h3>{sec.title}</h3>{/if}
+          <ul>{#each sec.items.filter((i) => i.trim()) as item}<li>{item}</li>{/each}</ul>
+        {/each}
+      </section>
+      <section>
+        <h2>Steps</h2>
+        {#each recipe.steps as sec, si}
+          {#if sec.title}<h3>{sec.title}</h3>{/if}
+          <ol start={stepNumber(si, 0)}>{#each sec.items.filter((i) => i.trim()) as item}<li>{item}</li>{/each}</ol>
+        {/each}
+      </section>
+    </div>
+    {#if recipe.notes}
+      <section><h2>Notes</h2><p class="p-notes">{recipe.notes}</p></section>
+    {/if}
+    {#if recipe.source_url}<p class="p-source">Source: {recipe.source_url}</p>{/if}
+  </article>
 {:else}
   <p class="loading">Loading…</p>
 {/if}
 
 <style>
+  .print-view { display: none; }
+  @media print {
+    :global(nav), :global(.banner), .topbar, .hero, .head, .cards, .notes, .photos { display: none !important; }
+    :global(html), :global(body), :global(main) { background: #fff !important; color: #000 !important; overflow: visible !important; height: auto !important; }
+    :global(.shell) { display: block !important; height: auto !important; }
+    :global(main) { padding: 0 !important; }
+    .print-view { display: block; font-size: 11pt; line-height: 1.45; color: #000; }
+    .print-view h1 { font-family: var(--font-display); font-size: 24pt; margin: 0 0 4pt; }
+    .print-view h2 { font-family: var(--font-display); font-size: 14pt; margin: 14pt 0 6pt; border-bottom: 1px solid #ccc; padding-bottom: 3pt; }
+    .print-view h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.04em; margin: 8pt 0 4pt; color: #444; }
+    .p-desc { margin: 0 0 6pt; color: #333; }
+    .p-facts { display: flex; gap: 14pt; margin: 0 0 10pt; color: #333; }
+    .p-hero { width: 100%; max-height: 3in; object-fit: cover; border-radius: 6pt; margin-bottom: 6pt; }
+    .p-cols { display: grid; grid-template-columns: 1fr 1.6fr; gap: 20pt; }
+    .print-view ul, .print-view ol { margin: 0; padding-left: 16pt; list-style: revert; }
+    .print-view li { padding: 0; display: list-item; margin-bottom: 3pt; break-inside: avoid; }
+    .p-notes { white-space: pre-wrap; margin: 0; }
+    .p-source { margin-top: 14pt; font-size: 8.5pt; color: #666; word-break: break-all; }
+  }
   .topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .status { flex: 1; color: var(--text-2); font-size: 13px; }
   .back, .ghost {

@@ -13,6 +13,7 @@ All notable changes to Recipe Collector. Each entry is labelled Feature, Bug/Fix
 - Built-in browser to import from sites that block automatic downloads
 - In-app updates: checks GitHub releases and installs new versions
 - Save a page for import analysis from the built-in browser
+- Print recipes with a clean layout (or save as PDF)
 
 **Bug/Fix**
 - Windows installer installs per user, so no admin (UAC) prompt
