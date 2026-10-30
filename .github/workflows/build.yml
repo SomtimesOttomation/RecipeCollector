@@ -71,21 +71,34 @@ jobs:
       - name: Install packages
         run: npm install --no-audit --no-fund
       - name: Build installers
-        run: npx tauri build ${{ matrix.args }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tauri build ${{ matrix.args }} 2>&1 | tee build.log || {
+            # Surface the end of the log as annotations so failures are readable anywhere.
+            tail -n 40 build.log | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
       - name: Collect installers and checksums
         shell: bash
         run: |
           mkdir -p out
-          for f in ${{ matrix.bundles }}; do
-            [ -f "$f" ] || continue
-            cp "$f" out/
+          # Copy every installer, dropping the apostrophe and space from the file name.
+          find target -path '*/bundle/*' -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \) | while IFS= read -r f; do
+            name=$(basename "$f"); name=${name//\'/}; name=${name// /}
+            cp "$f" "out/$name"
           done
           cd out
+          count=$(ls | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No installers found. Bundle folders:"
+            find ../target -type d -name bundle -exec find {} -maxdepth 2 \; | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          fi
           for f in *; do
             if command -v sha256sum >/dev/null; then sha256sum "$f" > "$f.sha256"; else shasum -a 256 "$f" > "$f.sha256"; fi
           done
           ls -la
-          [ "$(ls | wc -l)" -gt 0 ]
       - uses: actions/upload-artifact@v4
         with:
           name: LolosReceitas-${{ matrix.name }}
