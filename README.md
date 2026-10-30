@@ -12,7 +12,7 @@ Early development. The app shell, library storage and Windows/macOS builds are i
 
 Installers are attached to each [release](../../releases):
 
-- **Windows:** `.msi` or setup `.exe`. If SmartScreen appears, choose **More info → Run anyway**.
+- **Windows:** setup `.exe`. Installs for your user only, so no admin prompt. If SmartScreen appears, choose **More info → Run anyway**.
 - **macOS:** `.dmg`. The app isn't notarized yet: on first launch, open **System Settings → Privacy & Security** and click **Open Anyway**.
 
 ## Your recipes
