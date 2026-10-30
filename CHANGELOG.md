@@ -4,6 +4,17 @@ All notable changes to Recipe Collector. Each entry is labelled Feature, Bug/Fix
 
 ## Unreleased
 
+## 0.3.0
+
+**Feature**
+- Folders: create, rename and delete folders, drag recipes onto them, and see your library listed in the sidebar
+- Tags: added automatically from the recipe's category, cuisine, diet and keywords, or by hand; browse by tag in the sidebar
+- Search across titles, ingredients, steps, notes and tags, with advanced filters for tags, author, site, time and folder
+- Units converter: switch any recipe between Auto (as written), Metric and US, including oven temperatures
+
+**Bug/Fix**
+- Updater understands release tags like v.0.2.0
+
 ## 0.2.0
 
 **Feature**

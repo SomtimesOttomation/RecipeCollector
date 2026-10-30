@@ -6,7 +6,7 @@ Built with [Tauri 2](https://tauri.app) (Rust) and Svelte.
 
 ## Status
 
-Early development. Import recipes from most sites (with a built-in browser for the tricky ones), edit everything, print, and update from inside the app. Folders, tags, search and a units converter are next.
+Early development. Import recipes from most sites (with a built-in browser for the tricky ones), edit everything, organise with folders and tags, search, convert between metric and US units, print, and update from inside the app.
 
 ## Download
 
