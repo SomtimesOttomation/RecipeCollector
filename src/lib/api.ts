@@ -14,6 +14,13 @@ export interface RecipeSummary {
   total_min: number | null;
   site_name: string | null;
   hero_image: string | null;
+  folder_id: number | null;
+}
+
+export interface Folder {
+  id: number;
+  name: string;
+  recipe_count: number;
 }
 
 export interface Section {
@@ -77,7 +84,7 @@ export async function libraryInfo(): Promise<LibraryInfo> {
 }
 
 export async function listRecipes(): Promise<RecipeSummary[]> {
-  if (!inTauri) return [{ id: 1, title: sample.title, total_min: 45, site_name: "example.com", hero_image: null }];
+  if (!inTauri) return [{ id: 1, title: sample.title, total_min: 45, site_name: "example.com", hero_image: null, folder_id: null }];
   return invoke<RecipeSummary[]>("list_recipes");
 }
 
@@ -225,3 +232,37 @@ export function setAutoCheck(on: boolean) {
 }
 
 export const isMacPlatform = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
+
+// ---------- Folders ----------
+
+export async function listFolders(): Promise<Folder[]> {
+  if (!inTauri) return [];
+  return invoke<Folder[]>("list_folders");
+}
+
+export async function createFolder(name: string): Promise<Folder | null> {
+  if (!inTauri) return null;
+  return invoke<Folder>("create_folder", { name });
+}
+
+export async function renameFolder(id: number, name: string): Promise<void> {
+  if (!inTauri) return;
+  return invoke("rename_folder", { id, name });
+}
+
+export async function deleteFolder(id: number): Promise<void> {
+  if (!inTauri) return;
+  return invoke("delete_folder", { id });
+}
+
+export async function moveRecipe(recipeId: number, folderId: number | null): Promise<void> {
+  if (!inTauri) return;
+  return invoke("move_recipe", { recipeId, folderId });
+}
+
+export async function confirmDeleteFolder(name: string): Promise<boolean> {
+  const text = `Delete the folder "${name}"? Its recipes stay in your library.`;
+  if (!inTauri) return window.confirm(text);
+  const { ask } = await import("@tauri-apps/plugin-dialog");
+  return ask(text, { title: "Delete folder", kind: "warning" });
+}

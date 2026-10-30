@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub const LIBRARY_FOLDER_NAME: &str = "Recipe Collector";
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const MAX_IMAGE_EDGE: u32 = 2000;
 
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +55,15 @@ pub struct RecipeSummary {
     pub site_name: Option<String>,
     /// Absolute path of the cover photo, if any.
     pub hero_image: Option<String>,
+    /// The folder the recipe is in; none means not in a folder.
+    pub folder_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Folder {
+    pub id: i64,
+    pub name: String,
+    pub recipe_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -121,21 +130,23 @@ impl Library {
         let mut stmt = self.conn.prepare(
             "SELECT r.id, r.title, r.total_min, r.site_name,
                     (SELECT file_name FROM images i WHERE i.recipe_id = r.id
-                     ORDER BY i.is_hero DESC, i.position LIMIT 1)
+                     ORDER BY i.is_hero DESC, i.position LIMIT 1),
+                    r.folder_id
              FROM recipes r ORDER BY r.updated_at DESC, r.id DESC",
         )?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<String>>(4)?))
+            Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<String>>(4)?, r.get(5)?))
         })?;
         let mut out = vec![];
         for row in rows {
-            let (id, title, total_min, site_name, file) = row?;
+            let (id, title, total_min, site_name, file, folder_id) = row?;
             out.push(RecipeSummary {
                 id,
                 title,
                 total_min,
                 site_name,
                 hero_image: file.map(|f| self.images_dir(id).join(f).display().to_string()),
+                folder_id,
             });
         }
         Ok(out)
@@ -338,10 +349,64 @@ impl Library {
         Ok(report_path)
     }
 
+    // ---------- Folders ----------
+
+    pub fn list_folders(&self) -> Result<Vec<Folder>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT f.id, f.name, (SELECT COUNT(*) FROM recipes r WHERE r.folder_id = f.id)
+             FROM folders f ORDER BY f.position, f.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| Ok(Folder { id: r.get(0)?, name: r.get(1)?, recipe_count: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn create_folder(&self, name: &str) -> Result<Folder> {
+        let name = clean_folder_name(name);
+        let pos: i64 = self.conn.query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM folders", [], |r| r.get(0))?;
+        self.conn.execute("INSERT INTO folders (name, position) VALUES (?1, ?2)", params![name, pos])?;
+        Ok(Folder { id: self.conn.last_insert_rowid(), name, recipe_count: 0 })
+    }
+
+    pub fn rename_folder(&self, id: i64, name: &str) -> Result<()> {
+        let changed = self.conn.execute("UPDATE folders SET name=?2 WHERE id=?1", params![id, clean_folder_name(name)])?;
+        if changed == 0 {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Deletes a folder; its recipes stay in the library, just not in a folder.
+    pub fn delete_folder(&self, id: i64) -> Result<()> {
+        self.conn.execute("UPDATE recipes SET folder_id = NULL WHERE folder_id = ?1", [id])?;
+        self.conn.execute("DELETE FROM folders WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    /// Puts a recipe in a folder, or takes it out of any folder with `None`.
+    pub fn move_recipe(&self, recipe_id: i64, folder_id: Option<i64>) -> Result<()> {
+        if let Some(f) = folder_id {
+            let exists: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM folders WHERE id=?1)", [f], |r| r.get(0))?;
+            if !exists {
+                return Err(Error::NotFound);
+            }
+        }
+        let changed = self.conn.execute("UPDATE recipes SET folder_id=?2 WHERE id=?1", params![recipe_id, folder_id])?;
+        if changed == 0 {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
+
     fn touch(&self, recipe_id: i64) -> Result<()> {
         self.conn.execute("UPDATE recipes SET updated_at=datetime('now') WHERE id=?1", [recipe_id])?;
         Ok(())
     }
+}
+
+fn clean_folder_name(name: &str) -> String {
+    let n: String = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let n: String = n.chars().take(60).collect();
+    if n.is_empty() { "New folder".to_string() } else { n }
 }
 
 fn write_sections(tx: &rusqlite::Transaction, id: i64, ingredients: &[Section], steps: &[Section]) -> Result<()> {
@@ -382,6 +447,17 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
     if version < 3 {
         conn.execute_batch("ALTER TABLE recipes ADD COLUMN video_url TEXT;")?;
+    }
+    if version < 4 {
+        conn.execute_batch(
+            "CREATE TABLE folders (
+                 id          INTEGER PRIMARY KEY,
+                 name        TEXT NOT NULL,
+                 position    INTEGER NOT NULL DEFAULT 0,
+                 created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             ALTER TABLE recipes ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL;",
+        )?;
     }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
@@ -500,7 +576,7 @@ mod tests {
         assert!(root.join("images").is_dir());
         let info = lib.info().unwrap();
         assert_eq!(info.recipe_count, 0);
-        assert_eq!(info.schema_version, 3);
+        assert_eq!(info.schema_version, 4);
     }
 
     #[test]
@@ -527,7 +603,7 @@ mod tests {
             conn.execute("INSERT INTO recipes (title) VALUES ('Old')", []).unwrap();
         }
         let mut lib = Library::open(&root).unwrap();
-        assert_eq!(lib.info().unwrap().schema_version, 3);
+        assert_eq!(lib.info().unwrap().schema_version, 4);
         let id = lib.save_parsed(&sample()).unwrap();
         assert_eq!(lib.get_recipe(id).unwrap().steps.len(), 2);
     }
@@ -594,6 +670,32 @@ mod tests {
         assert!(report.file_name().unwrap().to_string_lossy().ends_with("-example.com-report.txt"));
         let html = report.with_file_name(report.file_name().unwrap().to_string_lossy().replace("-report.txt", ".html"));
         assert!(html.exists());
+    }
+
+    #[test]
+    fn folders() {
+        let mut lib = Library::open(temp_root("folders")).unwrap();
+        let a = lib.save_parsed(&sample()).unwrap();
+        let b = lib.save_parsed(&sample()).unwrap();
+        let desserts = lib.create_folder("  Desserts  ").unwrap();
+        let soups = lib.create_folder("").unwrap();
+        assert_eq!(desserts.name, "Desserts");
+        assert_eq!(soups.name, "New folder");
+        lib.rename_folder(soups.id, "Soups").unwrap();
+
+        lib.move_recipe(a, Some(soups.id)).unwrap();
+        lib.move_recipe(b, Some(desserts.id)).unwrap();
+        lib.move_recipe(b, Some(soups.id)).unwrap(); // one folder at a time
+        let folders = lib.list_folders().unwrap();
+        assert_eq!(folders.iter().map(|f| (f.name.as_str(), f.recipe_count)).collect::<Vec<_>>(), vec![("Desserts", 0), ("Soups", 2)]);
+        assert!(lib.list_recipes().unwrap().iter().all(|r| r.folder_id == Some(soups.id)));
+
+        lib.move_recipe(a, None).unwrap();
+        assert!(lib.move_recipe(a, Some(999)).is_err());
+        lib.delete_folder(soups.id).unwrap();
+        assert_eq!(lib.list_folders().unwrap().len(), 1);
+        assert_eq!(lib.list_recipes().unwrap().len(), 2, "recipes survive deleting their folder");
+        assert!(lib.list_recipes().unwrap().iter().all(|r| r.folder_id.is_none()));
     }
 
     #[test]

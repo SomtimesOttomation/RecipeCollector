@@ -26,6 +26,11 @@
     "allow-print-page",
     "allow-check-for-update",
     "allow-install-update",
-    "allow-app-version"
+    "allow-app-version",
+    "allow-list-folders",
+    "allow-create-folder",
+    "allow-rename-folder",
+    "allow-delete-folder",
+    "allow-move-recipe"
   ]
 }
