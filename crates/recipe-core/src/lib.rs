@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub const LIBRARY_FOLDER_NAME: &str = "Recipe Collector";
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const MAX_IMAGE_EDGE: u32 = 2000;
 
 #[derive(Debug, thiserror::Error)]
@@ -53,8 +53,26 @@ pub struct RecipeSummary {
     pub title: String,
     pub total_min: Option<i64>,
     pub site_name: Option<String>,
+    pub author: Option<String>,
     /// Absolute path of the cover photo, if any.
     pub hero_image: Option<String>,
+    /// The folder the recipe is in; none means not in a folder.
+    pub folder_id: Option<i64>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Tag {
+    pub id: i64,
+    pub name: String,
+    pub recipe_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Folder {
+    pub id: i64,
+    pub name: String,
+    pub recipe_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -80,6 +98,8 @@ pub struct Recipe {
     pub notes: Option<String>,
     #[serde(default)]
     pub video_url: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub ingredients: Vec<Section>,
     pub steps: Vec<Section>,
     #[serde(default)]
@@ -121,22 +141,39 @@ impl Library {
         let mut stmt = self.conn.prepare(
             "SELECT r.id, r.title, r.total_min, r.site_name,
                     (SELECT file_name FROM images i WHERE i.recipe_id = r.id
-                     ORDER BY i.is_hero DESC, i.position LIMIT 1)
+                     ORDER BY i.is_hero DESC, i.position LIMIT 1),
+                    r.folder_id, r.author
              FROM recipes r ORDER BY r.updated_at DESC, r.id DESC",
         )?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<String>>(4)?))
+            Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<String>>(4)?, r.get(5)?, r.get(6)?))
         })?;
         let mut out = vec![];
         for row in rows {
-            let (id, title, total_min, site_name, file) = row?;
+            let (id, title, total_min, site_name, file, folder_id, author) = row?;
             out.push(RecipeSummary {
                 id,
                 title,
                 total_min,
                 site_name,
+                author,
                 hero_image: file.map(|f| self.images_dir(id).join(f).display().to_string()),
+                folder_id,
+                tags: vec![],
             });
+        }
+        // All tags in one query, then shared out.
+        let mut tag_stmt = self.conn.prepare(
+            "SELECT rt.recipe_id, t.name FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id ORDER BY t.name COLLATE NOCASE",
+        )?;
+        let pairs = tag_stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        let mut by_recipe: std::collections::HashMap<i64, Vec<String>> = Default::default();
+        for p in pairs {
+            let (rid, name) = p?;
+            by_recipe.entry(rid).or_default().push(name);
+        }
+        for r in &mut out {
+            r.tags = by_recipe.remove(&r.id).unwrap_or_default();
         }
         Ok(out)
     }
@@ -161,6 +198,7 @@ impl Library {
             "INSERT INTO raw_imports (recipe_id, json_ld) VALUES (?1, ?2)",
             params![id, p.json_ld],
         )?;
+        write_tags(&tx, id, &p.tags)?;
         tx.commit()?;
         Ok(id)
     }
@@ -217,6 +255,7 @@ impl Library {
         }
 
         r.images = self.images_of(id)?;
+        r.tags = self.tags_of(id)?;
         Ok(r)
     }
 
@@ -244,12 +283,14 @@ impl Library {
         tx.execute("DELETE FROM ingredient_sections WHERE recipe_id=?1", [r.id])?;
         tx.execute("DELETE FROM steps WHERE recipe_id=?1", [r.id])?;
         write_sections(&tx, r.id, &r.ingredients, &r.steps)?;
+        write_tags(&tx, r.id, &r.tags)?;
         tx.commit()?;
         Ok(())
     }
 
     pub fn delete_recipe(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM recipes WHERE id=?1", [id])?;
+        self.conn.execute(DROP_UNUSED_TAGS, [])?;
         let dir = self.images_dir(id);
         if dir.exists() {
             std::fs::remove_dir_all(dir)?;
@@ -338,10 +379,160 @@ impl Library {
         Ok(report_path)
     }
 
+    // ---------- Folders ----------
+
+    pub fn list_folders(&self) -> Result<Vec<Folder>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT f.id, f.name, (SELECT COUNT(*) FROM recipes r WHERE r.folder_id = f.id)
+             FROM folders f ORDER BY f.position, f.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| Ok(Folder { id: r.get(0)?, name: r.get(1)?, recipe_count: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn create_folder(&self, name: &str) -> Result<Folder> {
+        let name = clean_folder_name(name);
+        let pos: i64 = self.conn.query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM folders", [], |r| r.get(0))?;
+        self.conn.execute("INSERT INTO folders (name, position) VALUES (?1, ?2)", params![name, pos])?;
+        Ok(Folder { id: self.conn.last_insert_rowid(), name, recipe_count: 0 })
+    }
+
+    pub fn rename_folder(&self, id: i64, name: &str) -> Result<()> {
+        let changed = self.conn.execute("UPDATE folders SET name=?2 WHERE id=?1", params![id, clean_folder_name(name)])?;
+        if changed == 0 {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Deletes a folder; its recipes stay in the library, just not in a folder.
+    pub fn delete_folder(&self, id: i64) -> Result<()> {
+        self.conn.execute("UPDATE recipes SET folder_id = NULL WHERE folder_id = ?1", [id])?;
+        self.conn.execute("DELETE FROM folders WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    /// Puts a recipe in a folder, or takes it out of any folder with `None`.
+    pub fn move_recipe(&self, recipe_id: i64, folder_id: Option<i64>) -> Result<()> {
+        if let Some(f) = folder_id {
+            let exists: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM folders WHERE id=?1)", [f], |r| r.get(0))?;
+            if !exists {
+                return Err(Error::NotFound);
+            }
+        }
+        let changed = self.conn.execute("UPDATE recipes SET folder_id=?2 WHERE id=?1", params![recipe_id, folder_id])?;
+        if changed == 0 {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
+
+    // ---------- Tags ----------
+
+    fn tags_of(&self, recipe_id: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.name FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id WHERE rt.recipe_id = ?1 ORDER BY t.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([recipe_id], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn list_tags(&self) -> Result<Vec<Tag>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.id, t.name, COUNT(rt.recipe_id) FROM tags t
+             LEFT JOIN recipe_tags rt ON rt.tag_id = t.id
+             GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| Ok(Tag { id: r.get(0)?, name: r.get(1)?, recipe_count: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Renames a tag everywhere. Renaming onto an existing tag merges the two.
+    pub fn rename_tag(&mut self, id: i64, name: &str) -> Result<()> {
+        let name = parse::normalize_tags([name.to_string()], 1).pop().ok_or(Error::NotFound)?;
+        let tx = self.conn.transaction()?;
+        let existing: Option<i64> = tx
+            .query_row("SELECT id FROM tags WHERE name = ?1 COLLATE NOCASE AND id != ?2", params![name, id], |r| r.get(0))
+            .optional()?;
+        match existing {
+            Some(other) => {
+                tx.execute("INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) SELECT recipe_id, ?2 FROM recipe_tags WHERE tag_id = ?1", params![id, other])?;
+                tx.execute("DELETE FROM tags WHERE id = ?1", [id])?;
+            }
+            None => {
+                if tx.execute("UPDATE tags SET name = ?2 WHERE id = ?1", params![id, name])? == 0 {
+                    return Err(Error::NotFound);
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Removes a tag from every recipe.
+    pub fn delete_tag(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM tags WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // ---------- Search ----------
+
+    /// Ids of recipes containing every word of `query` anywhere: title, description, notes,
+    /// author, site, ingredients, steps or tags. Title matches come first.
+    pub fn search(&self, query: &str) -> Result<Vec<i64>> {
+        let words: Vec<String> = query.split_whitespace().map(|w| w.to_lowercase()).filter(|w| !w.is_empty()).take(10).collect();
+        if words.is_empty() {
+            return Ok(vec![]);
+        }
+        let conds: Vec<String> = (1..=words.len()).map(|i| format!("hay LIKE ?{i} ESCAPE '\\'")).collect();
+        let first_title = format!("lower(title) LIKE ?{}  ESCAPE '\\'", words.len() + 1);
+        let sql = format!(
+            "WITH h AS (
+               SELECT r.id, r.title, r.updated_at, lower(
+                 r.title || ' ' || COALESCE(r.description,'') || ' ' || COALESCE(r.notes,'') || ' ' ||
+                 COALESCE(r.author,'') || ' ' || COALESCE(r.site_name,'') || ' ' ||
+                 COALESCE((SELECT group_concat(i.raw_text, ' ') FROM ingredients i
+                           JOIN ingredient_sections s ON s.id = i.section_id WHERE s.recipe_id = r.id), '') || ' ' ||
+                 COALESCE((SELECT group_concat(st.text, ' ') FROM steps st WHERE st.recipe_id = r.id), '') || ' ' ||
+                 COALESCE((SELECT group_concat(t.name, ' ') FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id
+                           WHERE rt.recipe_id = r.id), '')
+               ) AS hay FROM recipes r)
+             SELECT id FROM h WHERE {} ORDER BY ({}) DESC, updated_at DESC, id DESC",
+            conds.join(" AND "),
+            first_title
+        );
+        let escape = |w: &str| w.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let mut params: Vec<String> = words.iter().map(|w| format!("%{}%", escape(w))).collect();
+        params.push(format!("%{}%", escape(&words[0])));
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     fn touch(&self, recipe_id: i64) -> Result<()> {
         self.conn.execute("UPDATE recipes SET updated_at=datetime('now') WHERE id=?1", [recipe_id])?;
         Ok(())
     }
+}
+
+const DROP_UNUSED_TAGS: &str = "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM recipe_tags)";
+
+/// Replaces a recipe's tags, creating new ones as needed and tidying away unused ones.
+fn write_tags(tx: &rusqlite::Transaction, recipe_id: i64, tags: &[String]) -> Result<()> {
+    tx.execute("DELETE FROM recipe_tags WHERE recipe_id = ?1", [recipe_id])?;
+    for name in parse::normalize_tags(tags.iter().cloned(), 40) {
+        tx.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [&name])?;
+        let tag_id: i64 = tx.query_row("SELECT id FROM tags WHERE name = ?1 COLLATE NOCASE", [&name], |r| r.get(0))?;
+        tx.execute("INSERT OR IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES (?1, ?2)", params![recipe_id, tag_id])?;
+    }
+    tx.execute(DROP_UNUSED_TAGS, [])?;
+    Ok(())
+}
+
+fn clean_folder_name(name: &str) -> String {
+    let n: String = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let n: String = n.chars().take(60).collect();
+    if n.is_empty() { "New folder".to_string() } else { n }
 }
 
 fn write_sections(tx: &rusqlite::Transaction, id: i64, ingredients: &[Section], steps: &[Section]) -> Result<()> {
@@ -382,6 +573,17 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
     if version < 3 {
         conn.execute_batch("ALTER TABLE recipes ADD COLUMN video_url TEXT;")?;
+    }
+    if version < 4 {
+        conn.execute_batch(
+            "CREATE TABLE folders (
+                 id          INTEGER PRIMARY KEY,
+                 name        TEXT NOT NULL,
+                 position    INTEGER NOT NULL DEFAULT 0,
+                 created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             ALTER TABLE recipes ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL;",
+        )?;
     }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
@@ -500,7 +702,7 @@ mod tests {
         assert!(root.join("images").is_dir());
         let info = lib.info().unwrap();
         assert_eq!(info.recipe_count, 0);
-        assert_eq!(info.schema_version, 3);
+        assert_eq!(info.schema_version, 4);
     }
 
     #[test]
@@ -527,7 +729,7 @@ mod tests {
             conn.execute("INSERT INTO recipes (title) VALUES ('Old')", []).unwrap();
         }
         let mut lib = Library::open(&root).unwrap();
-        assert_eq!(lib.info().unwrap().schema_version, 3);
+        assert_eq!(lib.info().unwrap().schema_version, 4);
         let id = lib.save_parsed(&sample()).unwrap();
         assert_eq!(lib.get_recipe(id).unwrap().steps.len(), 2);
     }
@@ -594,6 +796,86 @@ mod tests {
         assert!(report.file_name().unwrap().to_string_lossy().ends_with("-example.com-report.txt"));
         let html = report.with_file_name(report.file_name().unwrap().to_string_lossy().replace("-report.txt", ".html"));
         assert!(html.exists());
+    }
+
+    #[test]
+    fn folders() {
+        let mut lib = Library::open(temp_root("folders")).unwrap();
+        let a = lib.save_parsed(&sample()).unwrap();
+        let b = lib.save_parsed(&sample()).unwrap();
+        let desserts = lib.create_folder("  Desserts  ").unwrap();
+        let soups = lib.create_folder("").unwrap();
+        assert_eq!(desserts.name, "Desserts");
+        assert_eq!(soups.name, "New folder");
+        lib.rename_folder(soups.id, "Soups").unwrap();
+
+        lib.move_recipe(a, Some(soups.id)).unwrap();
+        lib.move_recipe(b, Some(desserts.id)).unwrap();
+        lib.move_recipe(b, Some(soups.id)).unwrap(); // one folder at a time
+        let folders = lib.list_folders().unwrap();
+        assert_eq!(folders.iter().map(|f| (f.name.as_str(), f.recipe_count)).collect::<Vec<_>>(), vec![("Desserts", 0), ("Soups", 2)]);
+        assert!(lib.list_recipes().unwrap().iter().all(|r| r.folder_id == Some(soups.id)));
+
+        lib.move_recipe(a, None).unwrap();
+        assert!(lib.move_recipe(a, Some(999)).is_err());
+        lib.delete_folder(soups.id).unwrap();
+        assert_eq!(lib.list_folders().unwrap().len(), 1);
+        assert_eq!(lib.list_recipes().unwrap().len(), 2, "recipes survive deleting their folder");
+        assert!(lib.list_recipes().unwrap().iter().all(|r| r.folder_id.is_none()));
+    }
+
+    #[test]
+    fn tags() {
+        let mut lib = Library::open(temp_root("tags")).unwrap();
+        let mut p = sample();
+        p.tags = vec!["Soup".into(), "Portuguese".into()];
+        let a = lib.save_parsed(&p).unwrap();
+        p.tags = vec!["soup".into(), "Winter".into()];
+        let b = lib.save_parsed(&p).unwrap();
+
+        let names = |lib: &Library| lib.list_tags().unwrap().into_iter().map(|t| (t.name, t.recipe_count)).collect::<Vec<_>>();
+        assert_eq!(names(&lib), vec![("Portuguese".into(), 1), ("Soup".into(), 2), ("Winter".into(), 1)]);
+        assert_eq!(lib.get_recipe(a).unwrap().tags, vec!["Portuguese", "Soup"]);
+        assert_eq!(lib.list_recipes().unwrap().iter().find(|r| r.id == b).unwrap().tags, vec!["Soup", "Winter"]);
+
+        // Editing a recipe's tags; unused tags disappear.
+        let mut r = lib.get_recipe(a).unwrap();
+        r.tags = vec!["Soup".into(), "Comfort food".into()];
+        lib.update_recipe(&r).unwrap();
+        assert_eq!(names(&lib), vec![("Comfort food".into(), 1), ("Soup".into(), 2), ("Winter".into(), 1)]);
+
+        // Renaming onto an existing tag merges them.
+        let winter = lib.list_tags().unwrap().into_iter().find(|t| t.name == "Winter").unwrap();
+        lib.rename_tag(winter.id, "comfort food").unwrap();
+        assert_eq!(names(&lib), vec![("Comfort food".into(), 2), ("Soup".into(), 2)]);
+
+        let soup = lib.list_tags().unwrap().into_iter().find(|t| t.name == "Soup").unwrap();
+        lib.delete_tag(soup.id).unwrap();
+        assert_eq!(lib.get_recipe(b).unwrap().tags, vec!["Comfort food"]);
+    }
+
+    #[test]
+    fn search() {
+        let mut lib = Library::open(temp_root("search")).unwrap();
+        let a = lib.save_parsed(&sample()).unwrap(); // Caldo verde: potatoes, kale, olive oil
+        let mut p = sample();
+        p.title = "Kale chips".into();
+        p.ingredients = vec![Section { title: None, items: vec!["1 bunch kale".into(), "50% less salt".into()] }];
+        p.steps = vec![Section { title: None, items: vec!["Bake until crisp.".into()] }];
+        p.tags = vec!["Snack".into()];
+        p.author = Some("Ana Silva".into());
+        let b = lib.save_parsed(&p).unwrap();
+
+        assert_eq!(lib.search("kale").unwrap(), vec![b, a], "title match first");
+        assert_eq!(lib.search("POTATOES").unwrap(), vec![a], "ignores case, searches ingredients");
+        assert_eq!(lib.search("kale crisp").unwrap(), vec![b], "every word must match");
+        assert_eq!(lib.search("snack").unwrap(), vec![b], "searches tags");
+        assert_eq!(lib.search("silva").unwrap(), vec![b], "searches author");
+        assert_eq!(lib.search("drizzle").unwrap(), vec![a], "searches steps");
+        assert_eq!(lib.search("50%").unwrap(), vec![b], "% is literal");
+        assert!(lib.search("%").unwrap().len() == 1);
+        assert!(lib.search("   ").unwrap().is_empty());
+        assert!(lib.search("chocolate").unwrap().is_empty());
     }
 
     #[test]

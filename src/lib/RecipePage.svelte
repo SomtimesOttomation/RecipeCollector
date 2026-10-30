@@ -4,6 +4,8 @@
     getRecipe, updateRecipe, deleteRecipe, addImageFromFile, setHero, removeImage,
     pickPhoto, confirmDelete, openLink, photoUrl, inTauri, youtubeId, printPage, type Recipe, type Section,
   } from "./api";
+  import { lib, moveTo } from "./store.svelte";
+  import { convertText, detectSystem, systemLabel, loadUnitMode, saveUnitMode, type UnitMode } from "./units";
 
   let { id, onclose }: { id: number; onclose: () => void } = $props();
 
@@ -168,6 +170,37 @@
     return { destroy: () => node.removeEventListener("input", fit) };
   }
 
+  let unitMode = $state<UnitMode>(loadUnitMode());
+  function setMode(m: UnitMode) {
+    unitMode = m;
+    saveUnitMode(m);
+  }
+  let written = $derived(
+    recipe ? detectSystem([...(recipe as Recipe).ingredients.flatMap((s) => s.items), ...(recipe as Recipe).steps.flatMap((s) => s.items)]) : "none",
+  );
+
+  let newTag = $state("");
+  function addTag() {
+    const t = newTag.trim().replace(/^#/, "");
+    if (!recipe || !t) return;
+    if (!recipe.tags.some((x) => x.toLowerCase() === t.toLowerCase())) recipe.tags.push(t);
+    newTag = "";
+  }
+  function tagKey(e: KeyboardEvent) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addTag();
+    } else if (e.key === "Backspace" && !newTag && recipe?.tags.length) {
+      recipe.tags.pop();
+    }
+  }
+
+  let folderId = $derived(lib.recipes.find((r) => r.id === id)?.folder_id ?? null);
+  async function changeFolder(e: Event) {
+    const v = (e.target as HTMLSelectElement).value;
+    await moveTo(id, v === "" ? null : parseInt(v, 10));
+  }
+
   let hero = $derived.by(() => {
     const r = recipe as Recipe | null;
     return r ? (r.images.find((i) => i.is_hero) ?? r.images[0] ?? null) : null;
@@ -206,14 +239,59 @@
       <label>Prep <input type="number" min="0" bind:value={recipe.prep_min} placeholder="—" /> min</label>
       <label>Cook <input type="number" min="0" bind:value={recipe.cook_min} placeholder="—" /> min</label>
       <label>Total <input type="number" min="0" bind:value={recipe.total_min} placeholder="—" /> min</label>
+      {#if lib.folders.length > 0}
+        <label class="folder-pick">📁
+          <select value={folderId === null ? "" : String(folderId)} onchange={changeFolder}>
+            <option value="">Not in a folder</option>
+            {#each lib.folders as f (f.id)}<option value={String(f.id)}>{f.name}</option>{/each}
+          </select>
+        </label>
+      {/if}
       {#if recipe.source_url}
         <button class="link" onclick={() => recipe?.source_url && openLink(recipe.source_url)}>
           {recipe.site_name ?? "Source"} ↗
         </button>
       {/if}
     </div>
+    <div class="tags">
+      {#each recipe.tags as t, i (t)}
+        <span class="tag">#{t}<button title="Remove tag" onclick={() => recipe?.tags.splice(i, 1)}>✕</button></span>
+      {/each}
+      <input
+        class="tag-input"
+        list="all-tags"
+        bind:value={newTag}
+        onkeydown={tagKey}
+        onblur={addTag}
+        placeholder={recipe.tags.length ? "Add tag" : "Add tags, e.g. Dessert, Quick"}
+      />
+      <datalist id="all-tags">
+        {#each lib.tags.filter((t) => !recipe?.tags.some((x) => x.toLowerCase() === t.name.toLowerCase())) as t (t.id)}
+          <option value={t.name}></option>
+        {/each}
+      </datalist>
+    </div>
   </header>
 
+  <div class="units">
+    <span class="units-label">Units</span>
+    <div class="seg">
+      {#each [["auto", "Auto"], ["metric", "Metric"], ["us", "US"]] as [m, label]}
+        <button class:on={unitMode === m} onclick={() => setMode(m as UnitMode)}>{label}</button>
+      {/each}
+    </div>
+    <span class="units-note">
+      {#if unitMode === "auto"}
+        As written: {systemLabel(written)}.
+      {:else if written === "none"}
+        Nothing to convert in this recipe.
+      {:else}
+        Converted for reading. Switch to Auto to edit.
+      {/if}
+    </span>
+  </div>
+
+  {#if unitMode === "auto"}
   <div class="cards">
     <section class="card">
       <h2>Ingredients</h2>
@@ -278,6 +356,34 @@
       </button>
     </section>
   </div>
+  {:else}
+    <div class="cards converted">
+      <section class="card">
+        <h2>Ingredients</h2>
+        {#each recipe.ingredients as sec}
+          {#if sec.title}<div class="ro-title">{sec.title}</div>{/if}
+          <ul class="ingredients">
+            {#each sec.items.filter((i) => i.trim()) as item}
+              {@const conv = convertText(item, unitMode)}
+              <li><span class="dot"></span><span class="ro" class:changed={conv !== item} title={conv !== item ? `Original: ${item}` : undefined}>{conv}</span></li>
+            {/each}
+          </ul>
+        {/each}
+      </section>
+      <section class="card">
+        <h2>Steps</h2>
+        {#each recipe.steps as sec, si}
+          {#if sec.title}<div class="ro-title">{sec.title}</div>{/if}
+          <ol class="steps">
+            {#each sec.items.filter((i) => i.trim()) as item, ii}
+              {@const conv = convertText(item, unitMode)}
+              <li><span class="num">{stepNumber(si, ii)}</span><span class="ro" class:changed={conv !== item} title={conv !== item ? `Original: ${item}` : undefined}>{conv}</span></li>
+            {/each}
+          </ol>
+        {/each}
+      </section>
+    </div>
+  {/if}
 
   <section class="card video">
     <h2>Video</h2>
@@ -339,14 +445,14 @@
         <h2>Ingredients</h2>
         {#each recipe.ingredients as sec}
           {#if sec.title}<h3>{sec.title}</h3>{/if}
-          <ul>{#each sec.items.filter((i) => i.trim()) as item}<li>{item}</li>{/each}</ul>
+          <ul>{#each sec.items.filter((i) => i.trim()) as item}<li>{convertText(item, unitMode)}</li>{/each}</ul>
         {/each}
       </section>
       <section>
         <h2>Steps</h2>
         {#each recipe.steps as sec, si}
           {#if sec.title}<h3>{sec.title}</h3>{/if}
-          <ol start={stepNumber(si, 0)}>{#each sec.items.filter((i) => i.trim()) as item}<li>{item}</li>{/each}</ol>
+          <ol start={stepNumber(si, 0)}>{#each sec.items.filter((i) => i.trim()) as item}<li>{convertText(item, unitMode)}</li>{/each}</ol>
         {/each}
       </section>
     </div>
@@ -362,7 +468,7 @@
 <style>
   .print-view { display: none; }
   @media print {
-    :global(nav), :global(.banner), .topbar, .hero, .head, .cards, .notes, .photos, .video { display: none !important; }
+    :global(nav), :global(.banner), .topbar, .hero, .head, .units, .cards, .notes, .photos, .video { display: none !important; }
     :global(html), :global(body), :global(main) { background: #fff !important; color: #000 !important; overflow: visible !important; height: auto !important; }
     :global(.shell) { display: block !important; height: auto !important; }
     :global(main) { padding: 0 !important; }
@@ -428,6 +534,29 @@
   }
   .facts label:first-child input { width: 110px; text-align: left; }
   .facts input::-webkit-inner-spin-button { display: none; }
+  .units { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+  .units-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); }
+  .seg { display: inline-flex; background: var(--surface-2); border-radius: var(--radius-sm); padding: 3px; }
+  .seg button { border: 0; background: transparent; padding: 5px 14px; border-radius: 7px; color: var(--text-2); font-weight: 600; }
+  .seg button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  .units-note { font-size: 13px; color: var(--text-2); }
+  .ro { flex: 1; font-size: 14.5px; line-height: 1.5; padding: 2px 4px; user-select: text; }
+  .ro.changed { text-decoration: underline dotted var(--accent); text-underline-offset: 3px; }
+  .ro-title { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); margin: 8px 0 4px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; padding: 3px 6px 3px 10px;
+    border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  }
+  .tag button { border: 0; background: none; color: inherit; opacity: 0.6; font-size: 10px; padding: 2px 3px; }
+  .tag button:hover { opacity: 1; }
+  .tag-input {
+    border: 0; background: none; outline: none; font: inherit; font-size: 13px; min-width: 150px; padding: 4px 2px;
+    color: var(--text);
+  }
+  .folder-pick select {
+    border: 0; background: none; outline: none; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;
+  }
   .link { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 13px; padding: 5px 8px; }
 
   .cards {

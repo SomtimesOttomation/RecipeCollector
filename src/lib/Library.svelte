@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { listRecipes, importRecipe, openImportBrowser, onBrowserImport, photoUrl, type RecipeSummary } from "./api";
+  import { importRecipe, openImportBrowser, onBrowserImport, photoUrl } from "./api";
+  import { lib, refresh, inScope, scopeName, currentFolderId, moveTo, isRecipeDrag, RECIPE_DRAG, search, searchActive, searchResults, clearSearch } from "./store.svelte";
+  import SearchBar from "./SearchBar.svelte";
 
   let { onopen }: { onopen: (id: number) => void } = $props();
 
-  let recipes = $state<RecipeSummary[]>([]);
+  let searching = $derived(searchActive());
+  let shown = $derived(searching ? searchResults() : lib.recipes.filter((r) => inScope(r, lib.scope)));
   let url = $state("");
   let busy = $state(false);
   let error = $state("");
@@ -13,14 +16,22 @@
   let unlisten: (() => void) | undefined;
 
   onMount(async () => {
-    recipes = await listRecipes();
-    unlisten = await onBrowserImport((id) => {
+    await refresh();
+    unlisten = await onBrowserImport(async (id) => {
       error = "";
       failedUrl = "";
       url = "";
-      onopen(id);
+      await placeAndOpen(id);
     });
   });
+
+  /** New recipes go into the folder being viewed, then open. */
+  async function placeAndOpen(id: number) {
+    const folder = currentFolderId();
+    if (folder !== null) await moveTo(id, folder);
+    else await refresh();
+    onopen(id);
+  }
 
   onDestroy(() => unlisten?.());
 
@@ -44,7 +55,7 @@
     try {
       const id = await importRecipe(target);
       url = "";
-      onopen(id);
+      await placeAndOpen(id);
     } catch (e) {
       error = explain(e);
       if (!String(e).includes("web address")) failedUrl = target;
@@ -59,6 +70,7 @@
   }
 
   function drop(e: DragEvent) {
+    if (isRecipeDrag(e)) return; // moving a recipe, not adding a link
     e.preventDefault();
     dragging = false;
     const link = e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain") || "";
@@ -76,13 +88,14 @@
 </script>
 
 <svelte:window
-  ondragover={(e) => { e.preventDefault(); dragging = true; }}
+  ondragover={(e) => { if (isRecipeDrag(e)) return; e.preventDefault(); dragging = true; }}
   ondragleave={(e) => { if (!e.relatedTarget) dragging = false; }}
   ondrop={drop}
 />
 
 <header>
-  <h1>Library</h1>
+  <SearchBar />
+  <h1>{searching ? "Search results" : scopeName(lib.scope)}</h1>
   <form class="add" class:busy onsubmit={submit}>
     <input
       type="text"
@@ -103,7 +116,10 @@
       {/if}
     </div>
   {:else}
-    <p class="hint">Works with most recipe sites and Pinterest pins. You can also drag a link onto the window.</p>
+    <p class="hint">
+      Works with most recipe sites and Pinterest pins. You can also drag a link onto the window.
+      {#if lib.scope.kind === "folder"}New recipes go into this folder.{/if}
+    </p>
   {/if}
 </header>
 
@@ -111,7 +127,19 @@
   <div class="dropzone">Drop the link to add the recipe</div>
 {/if}
 
-{#if recipes.length === 0}
+{#if searching && shown.length === 0}
+  <section class="empty">
+    <div class="plate">🔍</div>
+    <h2>No matches</h2>
+    <p>Try fewer words or fewer filters. <button class="inline" onclick={clearSearch}>Clear search</button></p>
+  </section>
+{:else if lib.loaded && lib.recipes.length > 0 && shown.length === 0}
+  <section class="empty">
+    <div class="plate">📁</div>
+    <h2>Nothing here yet</h2>
+    <p>Drag recipes onto this folder in the sidebar, or paste a link above while this folder is open.</p>
+  </section>
+{:else if lib.loaded && lib.recipes.length === 0}
   <section class="empty">
     <div class="plate">🍽️</div>
     <h2>No recipes yet</h2>
@@ -119,8 +147,13 @@
   </section>
 {:else}
   <section class="grid">
-    {#each recipes as r (r.id)}
-      <button class="card" onclick={() => onopen(r.id)}>
+    {#each shown as r (r.id)}
+      <button
+        class="card"
+        draggable="true"
+        ondragstart={(e) => { e.dataTransfer?.setData(RECIPE_DRAG, String(r.id)); if (e.dataTransfer) e.dataTransfer.effectAllowed = "move"; }}
+        onclick={() => onopen(r.id)}
+      >
         <div class="photo">
           {#if r.hero_image}
             <img src={photoUrl(r.hero_image)} alt="" loading="lazy" />
@@ -134,6 +167,12 @@
             {#if r.total_min}<span class="chip">{time(r.total_min)}</span>{/if}
             {#if r.site_name}<span class="site">{r.site_name}</span>{/if}
           </div>
+          {#if r.tags.length}
+            <div class="card-tags">
+              {#each r.tags.slice(0, 3) as t}<span>#{t}</span>{/each}
+              {#if r.tags.length > 3}<span>+{r.tags.length - 3}</span>{/if}
+            </div>
+          {/if}
         </div>
       </button>
     {/each}
@@ -270,4 +309,6 @@
     color: var(--accent);
   }
   .site { font-size: 12px; color: var(--text-2); }
+  .inline { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 600; }
+  .card-tags { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; font-size: 11.5px; color: var(--text-2); }
 </style>

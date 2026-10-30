@@ -18,6 +18,15 @@ const COMMANDS: &[&str] = &[
     "check_for_update",
     "install_update",
     "app_version",
+    "list_folders",
+    "create_folder",
+    "rename_folder",
+    "delete_folder",
+    "move_recipe",
+    "list_tags",
+    "rename_tag",
+    "delete_tag",
+    "search_recipes",
 ];
 
 fn main() {
