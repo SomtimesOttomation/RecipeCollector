@@ -15,6 +15,13 @@ export interface RecipeSummary {
   site_name: string | null;
   hero_image: string | null;
   folder_id: number | null;
+  tags: string[];
+}
+
+export interface Tag {
+  id: number;
+  name: string;
+  recipe_count: number;
 }
 
 export interface Folder {
@@ -47,6 +54,7 @@ export interface Recipe {
   total_min: number | null;
   notes: string | null;
   video_url: string | null;
+  tags: string[];
   ingredients: Section[];
   steps: Section[];
   images: ImageInfo[];
@@ -67,6 +75,7 @@ const sample: Recipe = {
   total_min: 45,
   notes: null,
   video_url: null,
+  tags: ["Soup", "Portuguese"],
   ingredients: [{ title: null, items: ["1 lb potatoes", "4 cups kale, thinly sliced", "1 chouriço"] }],
   steps: [{ title: null, items: ["Boil the potatoes until soft.", "Blend, add the kale and simmer 5 minutes.", "Serve with chouriço slices."] }],
   images: [],
@@ -84,7 +93,7 @@ export async function libraryInfo(): Promise<LibraryInfo> {
 }
 
 export async function listRecipes(): Promise<RecipeSummary[]> {
-  if (!inTauri) return [{ id: 1, title: sample.title, total_min: 45, site_name: "example.com", hero_image: null, folder_id: null }];
+  if (!inTauri) return [{ id: 1, title: sample.title, total_min: 45, site_name: "example.com", hero_image: null, folder_id: null, tags: ["Soup", "Portuguese"] }];
   return invoke<RecipeSummary[]>("list_recipes");
 }
 
@@ -265,4 +274,28 @@ export async function confirmDeleteFolder(name: string): Promise<boolean> {
   if (!inTauri) return window.confirm(text);
   const { ask } = await import("@tauri-apps/plugin-dialog");
   return ask(text, { title: "Delete folder", kind: "warning" });
+}
+
+// ---------- Tags ----------
+
+export async function listTags(): Promise<Tag[]> {
+  if (!inTauri) return [{ id: 1, name: "Portuguese", recipe_count: 1 }, { id: 2, name: "Soup", recipe_count: 1 }];
+  return invoke<Tag[]>("list_tags");
+}
+
+export async function renameTag(id: number, name: string): Promise<void> {
+  if (!inTauri) return;
+  return invoke("rename_tag", { id, name });
+}
+
+export async function deleteTag(id: number): Promise<void> {
+  if (!inTauri) return;
+  return invoke("delete_tag", { id });
+}
+
+export async function confirmDeleteTag(name: string): Promise<boolean> {
+  const text = `Remove the tag "${name}" from every recipe?`;
+  if (!inTauri) return window.confirm(text);
+  const { ask } = await import("@tauri-apps/plugin-dialog");
+  return ask(text, { title: "Delete tag", kind: "warning" });
 }

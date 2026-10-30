@@ -23,6 +23,9 @@ const COMMANDS: &[&str] = &[
     "rename_folder",
     "delete_folder",
     "move_recipe",
+    "list_tags",
+    "rename_tag",
+    "delete_tag",
 ];
 
 fn main() {
