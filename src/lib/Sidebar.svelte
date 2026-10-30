@@ -1,5 +1,6 @@
 <script lang="ts">
-  let { view = $bindable() }: { view: "library" | "settings" } = $props();
+  type View = "library" | "settings";
+  let { view, onnavigate }: { view: View; onnavigate: (v: View) => void } = $props();
 </script>
 
 <nav>
@@ -9,13 +10,13 @@
     <span class="name">Recipe Collector</span>
   </div>
 
-  <button class:active={view === "library"} onclick={() => (view = "library")}>
+  <button class:active={view === "library"} onclick={() => onnavigate("library")}>
     <span class="ico">▦</span> Library
   </button>
 
   <div class="spacer"></div>
 
-  <button class:active={view === "settings"} onclick={() => (view = "settings")}>
+  <button class:active={view === "settings"} onclick={() => onnavigate("settings")}>
     <span class="ico">⚙</span> Settings
   </button>
 </nav>

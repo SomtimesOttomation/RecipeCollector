@@ -2,9 +2,14 @@
 name = "recipe-core"
 version = "0.1.0"
 edition = "2021"
-description = "Library storage (and later recipe import) for Recipe Collector, kept free of UI code so it builds and tests anywhere."
+description = "Library storage and recipe import for Recipe Collector, kept free of UI code so it builds and tests anywhere."
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
+scraper = "0.21"
+url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip", "brotli", "deflate"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
