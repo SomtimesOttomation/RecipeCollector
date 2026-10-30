@@ -1,0 +1,427 @@
+<script lang="ts">
+  import { onMount, onDestroy } from "svelte";
+  import {
+    getRecipe, updateRecipe, deleteRecipe, addImageFromFile, setHero, removeImage,
+    pickPhoto, confirmDelete, openLink, photoUrl, inTauri, type Recipe, type Section,
+  } from "./api";
+
+  let { id, onclose }: { id: number; onclose: () => void } = $props();
+
+  let recipe = $state<Recipe | null>(null);
+  let loadError = $state("");
+  let status = $state<"" | "saving" | "saved" | "error">("");
+  let saveError = $state("");
+  let lastSaved = "";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  onMount(async () => {
+    try {
+      recipe = await getRecipe(id);
+      lastSaved = snapshot(recipe);
+    } catch (e) {
+      loadError = String(e);
+    }
+  });
+
+  onDestroy(() => {
+    // Save anything pending when leaving the page.
+    if (timer) { clearTimeout(timer); flush(); }
+  });
+
+  function snapshot(r: Recipe) {
+    const { images, ...rest } = r;
+    return JSON.stringify(rest);
+  }
+
+  function toNum(v: unknown): number | null {
+    const n = typeof v === "number" ? v : parseInt(String(v ?? ""), 10);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+  }
+
+  function cleaned(r: Recipe): Recipe {
+    const blank = (s: string | null) => (s && s.trim() ? s : null);
+    const sections = (list: Section[]) =>
+      list
+        .map((s) => ({ title: blank(s.title), items: s.items.filter((i) => i.trim()) }))
+        .filter((s) => s.items.length || s.title);
+    return {
+      ...r,
+      title: r.title.trim() || "Untitled recipe",
+      description: blank(r.description),
+      servings: blank(r.servings),
+      notes: blank(r.notes),
+      prep_min: toNum(r.prep_min),
+      cook_min: toNum(r.cook_min),
+      total_min: toNum(r.total_min),
+      ingredients: sections(r.ingredients),
+      steps: sections(r.steps),
+    };
+  }
+
+  async function flush() {
+    if (!recipe) return;
+    const snap = snapshot(recipe);
+    if (snap === lastSaved) return;
+    status = "saving";
+    try {
+      await updateRecipe(cleaned($state.snapshot(recipe) as Recipe));
+      lastSaved = snap;
+      status = "saved";
+    } catch (e) {
+      status = "error";
+      saveError = String(e);
+    }
+  }
+
+  // Autosave shortly after each edit.
+  $effect(() => {
+    if (!recipe) return;
+    const snap = snapshot(recipe);
+    if (snap === lastSaved) return;
+    clearTimeout(timer);
+    status = "saving";
+    timer = setTimeout(() => { timer = undefined; flush(); }, 700);
+  });
+
+  // ---- list editing ----
+  function addItem(list: Section[], si: number) {
+    list[si].items.push("");
+    focusLast(`[data-sec="${si}"]`);
+  }
+  function removeItem(list: Section[], si: number, ii: number) {
+    list[si].items.splice(ii, 1);
+  }
+  function moveItem(list: Section[], si: number, ii: number, dir: -1 | 1) {
+    const items = list[si].items;
+    const j = ii + dir;
+    if (j < 0 || j >= items.length) return;
+    [items[ii], items[j]] = [items[j], items[ii]];
+  }
+  function addSection(list: Section[]) {
+    list.push({ title: "", items: [""] });
+  }
+  function focusLast(scope: string) {
+    queueMicrotask(() => {
+      const fields = document.querySelectorAll<HTMLElement>(`${scope} .item-field`);
+      fields[fields.length - 1]?.focus();
+    });
+  }
+  function onItemKey(e: KeyboardEvent, list: Section[], si: number, ii: number) {
+    if (e.key === "Enter" && !e.shiftKey && (e.target as HTMLElement).tagName === "INPUT") {
+      e.preventDefault();
+      list[si].items.splice(ii + 1, 0, "");
+      queueMicrotask(() => {
+        const fields = document.querySelectorAll<HTMLElement>(`[data-sec="${si}"] .item-field`);
+        fields[ii + 1]?.focus();
+      });
+    }
+  }
+  function stepNumber(si: number, ii: number) {
+    if (!recipe) return ii + 1;
+    let n = 0;
+    for (let s = 0; s < si; s++) n += recipe.steps[s].items.length;
+    return n + ii + 1;
+  }
+
+  // ---- photos ----
+  async function addPhoto(makeHero: boolean) {
+    if (!recipe) return;
+    const path = await pickPhoto();
+    if (!path) return;
+    try {
+      await addImageFromFile(recipe.id, path, makeHero);
+      recipe.images = (await getRecipe(recipe.id)).images;
+    } catch (e) {
+      saveError = String(e);
+      status = "error";
+    }
+  }
+  async function makeCover(imageId: number) {
+    if (!recipe) return;
+    await setHero(imageId);
+    recipe.images = (await getRecipe(recipe.id)).images;
+  }
+  async function dropPhoto(imageId: number) {
+    if (!recipe) return;
+    await removeImage(imageId);
+    recipe.images = (await getRecipe(recipe.id)).images;
+  }
+
+  async function remove() {
+    if (!recipe) return;
+    if (await confirmDelete(recipe.title)) {
+      clearTimeout(timer);
+      timer = undefined;
+      await deleteRecipe(recipe.id);
+      onclose();
+    }
+  }
+
+  function autosize(node: HTMLTextAreaElement) {
+    const fit = () => {
+      node.style.height = "auto";
+      node.style.height = node.scrollHeight + "px";
+    };
+    queueMicrotask(fit);
+    node.addEventListener("input", fit);
+    return { destroy: () => node.removeEventListener("input", fit) };
+  }
+
+  let hero = $derived.by(() => {
+    const r = recipe as Recipe | null;
+    return r ? (r.images.find((i) => i.is_hero) ?? r.images[0] ?? null) : null;
+  });
+</script>
+
+{#if loadError}
+  <p class="error">Couldn't open this recipe: {loadError}</p>
+  <button class="back" onclick={onclose}>← Library</button>
+{:else if recipe}
+  <div class="topbar">
+    <button class="back" onclick={onclose}>← Library</button>
+    <span class="status">
+      {#if status === "saving"}Saving…{:else if status === "saved"}Saved{:else if status === "error"}<span class="error">{saveError}</span>{/if}
+    </span>
+    <button class="ghost danger" onclick={remove}>Delete</button>
+  </div>
+
+  <section class="hero" class:empty={!hero}>
+    {#if hero}
+      <img src={photoUrl(hero.path)} alt="" />
+    {/if}
+    <div class="hero-actions">
+      {#if inTauri}
+        <button class="pill" onclick={() => addPhoto(true)}>{hero ? "Replace cover" : "Add a cover photo"}</button>
+      {/if}
+    </div>
+  </section>
+
+  <header class="head">
+    <input class="title" bind:value={recipe.title} placeholder="Recipe name" />
+    <textarea class="desc" use:autosize bind:value={recipe.description} placeholder="Add a short description" rows="1"></textarea>
+    <div class="facts">
+      <label>Serves <input bind:value={recipe.servings} placeholder="—" /></label>
+      <label>Prep <input type="number" min="0" bind:value={recipe.prep_min} placeholder="—" /> min</label>
+      <label>Cook <input type="number" min="0" bind:value={recipe.cook_min} placeholder="—" /> min</label>
+      <label>Total <input type="number" min="0" bind:value={recipe.total_min} placeholder="—" /> min</label>
+      {#if recipe.source_url}
+        <button class="link" onclick={() => recipe?.source_url && openLink(recipe.source_url)}>
+          {recipe.site_name ?? "Source"} ↗
+        </button>
+      {/if}
+    </div>
+  </header>
+
+  <div class="cards">
+    <section class="card">
+      <h2>Ingredients</h2>
+      {#if recipe.ingredients.length === 0}
+        <p class="missing">No ingredients were found on the page. Add them here.</p>
+      {/if}
+      {#each recipe.ingredients as sec, si}
+        <div class="section" data-sec={si}>
+          {#if sec.title !== null || recipe.ingredients.length > 1}
+            <input class="sec-title" bind:value={sec.title} placeholder="Section name (optional)" />
+          {/if}
+          <ul class="ingredients">
+            {#each sec.items as _, ii}
+              <li>
+                <span class="dot"></span>
+                <input class="item-field" bind:value={sec.items[ii]} placeholder="e.g. 2 cups flour"
+                  onkeydown={(e) => recipe && onItemKey(e, recipe.ingredients, si, ii)} />
+                <span class="row-tools">
+                  <button title="Move up" onclick={() => recipe && moveItem(recipe.ingredients, si, ii, -1)}>↑</button>
+                  <button title="Move down" onclick={() => recipe && moveItem(recipe.ingredients, si, ii, 1)}>↓</button>
+                  <button title="Remove" onclick={() => recipe && removeItem(recipe.ingredients, si, ii)}>✕</button>
+                </span>
+              </li>
+            {/each}
+          </ul>
+          <button class="add" onclick={() => recipe && addItem(recipe.ingredients, si)}>+ Add ingredient</button>
+        </div>
+      {/each}
+      <button class="add subtle" onclick={() => recipe && (recipe.ingredients.length ? addSection(recipe.ingredients) : recipe.ingredients.push({ title: null, items: [""] }))}>
+        {recipe.ingredients.length ? "+ Add section" : "+ Add ingredients"}
+      </button>
+    </section>
+
+    <section class="card">
+      <h2>Steps</h2>
+      {#if recipe.steps.length === 0}
+        <p class="missing">No steps were found on the page. Add them here.</p>
+      {/if}
+      {#each recipe.steps as sec, si}
+        <div class="section" data-sec={`s${si}`}>
+          {#if sec.title !== null || recipe.steps.length > 1}
+            <input class="sec-title" bind:value={sec.title} placeholder="Section name (optional)" />
+          {/if}
+          <ol class="steps">
+            {#each sec.items as _, ii}
+              <li>
+                <span class="num">{stepNumber(si, ii)}</span>
+                <textarea class="item-field" use:autosize bind:value={sec.items[ii]} rows="1" placeholder="Describe this step"></textarea>
+                <span class="row-tools">
+                  <button title="Move up" onclick={() => recipe && moveItem(recipe.steps, si, ii, -1)}>↑</button>
+                  <button title="Move down" onclick={() => recipe && moveItem(recipe.steps, si, ii, 1)}>↓</button>
+                  <button title="Remove" onclick={() => recipe && removeItem(recipe.steps, si, ii)}>✕</button>
+                </span>
+              </li>
+            {/each}
+          </ol>
+          <button class="add" onclick={() => { if (recipe) { recipe.steps[si].items.push(""); focusLast(`[data-sec="s${si}"]`); } }}>+ Add step</button>
+        </div>
+      {/each}
+      <button class="add subtle" onclick={() => recipe && (recipe.steps.length ? addSection(recipe.steps) : recipe.steps.push({ title: null, items: [""] }))}>
+        {recipe.steps.length ? "+ Add section" : "+ Add steps"}
+      </button>
+    </section>
+  </div>
+
+  <section class="card notes">
+    <h2>Notes</h2>
+    <textarea use:autosize bind:value={recipe.notes} rows="2" placeholder="Your tweaks, substitutions, who loved it…"></textarea>
+  </section>
+
+  <section class="card photos">
+    <h2>Photos</h2>
+    <div class="gallery">
+      {#each recipe.images as img (img.id)}
+        <figure class:cover={img.is_hero}>
+          <img src={photoUrl(img.path)} alt="" loading="lazy" />
+          <figcaption>
+            {#if img.is_hero}
+              <span class="badge">Cover</span>
+            {:else}
+              <button onclick={() => makeCover(img.id)}>Set as cover</button>
+            {/if}
+            <button onclick={() => dropPhoto(img.id)}>Remove</button>
+          </figcaption>
+        </figure>
+      {/each}
+      {#if inTauri}
+        <button class="add-photo" onclick={() => addPhoto(false)}>+ Add photo</button>
+      {/if}
+    </div>
+  </section>
+{:else}
+  <p class="loading">Loading…</p>
+{/if}
+
+<style>
+  .topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .status { flex: 1; color: var(--text-2); font-size: 13px; }
+  .back, .ghost {
+    border: 0; background: none; padding: 6px 10px; border-radius: var(--radius-sm); color: var(--text-2); font-weight: 600;
+  }
+  .back:hover, .ghost:hover { background: var(--surface-2); color: var(--text); }
+  .danger:hover { color: var(--accent); }
+  .error { color: var(--accent); }
+  .loading { color: var(--text-2); }
+
+  .hero {
+    position: relative;
+    border-radius: var(--radius);
+    overflow: hidden;
+    aspect-ratio: 21 / 8;
+    max-height: 380px;
+    width: 100%;
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+  }
+  .hero.empty { aspect-ratio: auto; height: 120px; display: grid; place-items: center; }
+  .hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .hero-actions { position: absolute; right: 14px; bottom: 14px; }
+  .hero.empty .hero-actions { position: static; }
+  .pill {
+    border: 0; border-radius: 99px; padding: 8px 14px; font-weight: 600;
+    background: rgba(255, 255, 255, 0.9); color: #2a2420; box-shadow: var(--shadow);
+  }
+
+  input, textarea { user-select: text; }
+  .head { margin: 22px 0 18px; }
+  .title {
+    width: 100%; border: 0; background: none; outline: none;
+    font-family: var(--font-display); font-size: 32px; font-weight: 700; padding: 0;
+  }
+  .desc {
+    width: 100%; border: 0; background: none; outline: none; resize: none;
+    color: var(--text-2); font: inherit; font-size: 15px; line-height: 1.5; margin-top: 6px; padding: 0;
+  }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+  .facts label {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 99px; padding: 5px 12px;
+  }
+  .facts input {
+    width: 54px; border: 0; background: none; outline: none; font-weight: 600; color: var(--text); text-align: center;
+  }
+  .facts label:first-child input { width: 110px; text-align: left; }
+  .facts input::-webkit-inner-spin-button { display: none; }
+  .link { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 13px; padding: 5px 8px; }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 18px;
+    align-items: start;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px 14px;
+    box-shadow: var(--shadow);
+  }
+  .card h2 { font-family: var(--font-display); font-size: 19px; margin: 0 0 12px; }
+  .notes, .photos { margin-top: 18px; }
+  .missing { color: var(--text-2); font-size: 13px; margin: 0 0 8px; }
+
+  .section + .section { margin-top: 14px; }
+  .sec-title {
+    width: 100%; border: 0; border-bottom: 1px dashed var(--border); background: none; outline: none;
+    font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2);
+    padding: 4px 0; margin-bottom: 6px;
+  }
+  ul, ol { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: flex-start; gap: 10px; padding: 4px 0; border-radius: 8px; }
+  li:hover .row-tools, li:focus-within .row-tools { opacity: 1; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 9px; flex-shrink: 0; }
+  .num {
+    flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+    display: grid; place-items: center; font-size: 12px; font-weight: 700; margin-top: 1px;
+  }
+  .item-field {
+    flex: 1; border: 0; background: none; outline: none; font: inherit; font-size: 14.5px; line-height: 1.5;
+    padding: 2px 4px; border-radius: 6px; resize: none; min-width: 0;
+  }
+  .item-field:focus { background: var(--surface-2); }
+  .row-tools { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+  .row-tools button {
+    border: 0; background: none; color: var(--text-2); width: 24px; height: 24px; border-radius: 6px; font-size: 12px;
+  }
+  .row-tools button:hover { background: var(--surface-2); color: var(--text); }
+  .add {
+    border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 13px; padding: 6px 0;
+  }
+  .add.subtle { color: var(--text-2); margin-top: 6px; }
+
+  .notes textarea {
+    width: 100%; border: 0; background: none; outline: none; resize: none; font: inherit; font-size: 14.5px; line-height: 1.5;
+  }
+
+  .gallery { display: flex; flex-wrap: wrap; gap: 12px; }
+  figure { margin: 0; width: 160px; }
+  figure img { width: 160px; height: 120px; object-fit: cover; border-radius: var(--radius-sm); display: block; }
+  figure.cover img { outline: 2px solid var(--accent); outline-offset: 2px; }
+  figcaption { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+  figcaption button {
+    border: 0; background: var(--surface-2); border-radius: 6px; padding: 3px 8px; font-size: 12px; color: var(--text-2);
+  }
+  figcaption button:hover { color: var(--text); }
+  .badge { font-size: 12px; font-weight: 700; color: var(--accent); padding: 3px 4px; }
+  .add-photo {
+    width: 160px; height: 120px; border: 2px dashed var(--border); border-radius: var(--radius-sm);
+    background: none; color: var(--text-2); font-weight: 600;
+  }
+  .add-photo:hover { border-color: var(--accent); color: var(--accent); }
+</style>
