@@ -205,6 +205,11 @@ fn delete_tag(id: i64, state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn search_recipes(query: String, state: State<AppState>) -> Result<Vec<i64>, String> {
+    state.with(|l| l.search(&query))
+}
+
+#[tauri::command]
 fn get_recipe(id: i64, state: State<AppState>) -> Result<Recipe, String> {
     state.with(|l| l.get_recipe(id))
 }
@@ -272,7 +277,8 @@ pub fn run() {
             move_recipe,
             list_tags,
             rename_tag,
-            delete_tag
+            delete_tag,
+            search_recipes
         ])
         .run(tauri::generate_context!())
         .expect("error while running Recipe Collector");

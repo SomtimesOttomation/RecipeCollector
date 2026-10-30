@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { createFolder, renameFolder, deleteFolder, confirmDeleteFolder, renameTag, deleteTag, confirmDeleteTag } from "./api";
-  import { lib, refresh, inScope, moveTo, draggedRecipe, isRecipeDrag, RECIPE_DRAG, type Scope } from "./store.svelte";
+  import { lib, refresh, inScope, moveTo, draggedRecipe, isRecipeDrag, RECIPE_DRAG, clearSearch, type Scope } from "./store.svelte";
 
   type View = "library" | "settings";
   let {
@@ -65,6 +65,7 @@
   let newName = $state("");
 
   function select(s: Scope) {
+    clearSearch();
     lib.scope = s;
     onnavigate("library");
   }

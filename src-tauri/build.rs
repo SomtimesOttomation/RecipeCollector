@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "list_tags",
     "rename_tag",
     "delete_tag",
+    "search_recipes",
 ];
 
 fn main() {
