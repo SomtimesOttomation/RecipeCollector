@@ -106,6 +106,18 @@ async fn import_page_html(html: String, url: String, app: AppHandle) -> Result<i
     Ok(id)
 }
 
+/// Called by the browser bar's "Save for analysis" button: saves the page and an import
+/// report into the library's debug folder and shows the report in the file manager.
+#[tauri::command]
+async fn save_debug_page(html: String, url: String, app: AppHandle) -> Result<String, String> {
+    let state = app.state::<AppState>().inner().clone();
+    let report = tauri::async_runtime::spawn_blocking(move || state.with(|l| l.save_debug_page(&html, &url)))
+        .await
+        .map_err(err)??;
+    let _ = tauri_plugin_opener::reveal_item_in_dir(&report);
+    Ok(report.display().to_string())
+}
+
 #[tauri::command]
 fn get_recipe(id: i64, state: State<AppState>) -> Result<Recipe, String> {
     state.with(|l| l.get_recipe(id))
@@ -156,6 +168,7 @@ pub fn run() {
             import_recipe,
             open_import_browser,
             import_page_html,
+            save_debug_page,
             get_recipe,
             update_recipe,
             delete_recipe,
