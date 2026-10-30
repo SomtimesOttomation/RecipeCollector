@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { importRecipe, openImportBrowser, onBrowserImport, photoUrl } from "./api";
-  import { lib, refresh, inScope, scopeName, currentFolderId, moveTo, isRecipeDrag, RECIPE_DRAG } from "./library.svelte";
+  import { lib, refresh, inScope, scopeName, currentFolderId, moveTo, isRecipeDrag, RECIPE_DRAG } from "./store.svelte";
 
   let { onopen }: { onopen: (id: number) => void } = $props();
 

@@ -7,7 +7,7 @@
   import UpdateBanner from "./lib/UpdateBanner.svelte";
   import { runCheck } from "./lib/updates.svelte";
   import { autoCheckEnabled } from "./lib/api";
-  import { refresh } from "./lib/library.svelte";
+  import { refresh } from "./lib/store.svelte";
   import { applyTheme, loadTheme, isMac, type Theme } from "./lib/theme";
 
   type View = "library" | "settings";

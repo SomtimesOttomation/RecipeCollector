@@ -4,7 +4,7 @@
     getRecipe, updateRecipe, deleteRecipe, addImageFromFile, setHero, removeImage,
     pickPhoto, confirmDelete, openLink, photoUrl, inTauri, youtubeId, printPage, type Recipe, type Section,
   } from "./api";
-  import { lib, moveTo } from "./library.svelte";
+  import { lib, moveTo } from "./store.svelte";
 
   let { id, onclose }: { id: number; onclose: () => void } = $props();
 

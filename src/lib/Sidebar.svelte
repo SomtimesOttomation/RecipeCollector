@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { createFolder, renameFolder, deleteFolder, confirmDeleteFolder } from "./api";
-  import { lib, refresh, inScope, moveTo, draggedRecipe, isRecipeDrag, RECIPE_DRAG, type Scope } from "./library.svelte";
+  import { lib, refresh, inScope, moveTo, draggedRecipe, isRecipeDrag, RECIPE_DRAG, type Scope } from "./store.svelte";
 
   type View = "library" | "settings";
   let {
