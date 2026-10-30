@@ -1,5 +1,5 @@
 # Changelog
 
-All notable changes to Lolo's Receitas. Each entry is labelled Feature, Bug/Fix, Redesign or Housekeeping.
+All notable changes to Recipe Collector. Each entry is labelled Feature, Bug/Fix, Redesign or Housekeeping.
 
 ## Unreleased

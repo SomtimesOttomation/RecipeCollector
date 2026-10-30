@@ -1,4 +1,4 @@
-use receitas_core::{Library, LibraryInfo, RecipeSummary, LIBRARY_FOLDER_NAME};
+use recipe_core::{Library, LibraryInfo, RecipeSummary, LIBRARY_FOLDER_NAME};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
@@ -29,7 +29,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // Default library location: Documents/Lolo's Receitas
+            // Default library location: Documents/Recipe Collector
             let docs = app.path().document_dir()?;
             let library = Library::open(docs.join(LIBRARY_FOLDER_NAME))?;
             app.manage(AppState(Mutex::new(library)));
@@ -37,5 +37,5 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![library_info, list_recipes, reveal_library])
         .run(tauri::generate_context!())
-        .expect("error while running Lolo's Receitas");
+        .expect("error while running Recipe Collector");
 }

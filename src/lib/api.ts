@@ -18,7 +18,7 @@ export interface RecipeSummary {
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export async function libraryInfo(): Promise<LibraryInfo> {
-  if (!inTauri) return { path: "~/Documents/Lolo's Receitas", recipe_count: 0, schema_version: 1 };
+  if (!inTauri) return { path: "~/Documents/Recipe Collector", recipe_count: 0, schema_version: 1 };
   return invoke<LibraryInfo>("library_info");
 }
 

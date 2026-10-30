@@ -24,7 +24,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Core library tests
-        run: cargo test -p receitas-core
+        run: cargo test -p recipe-core
       - name: Install packages
         run: npm install --no-audit --no-fund
       - name: UI type check
@@ -102,7 +102,7 @@ jobs:
           ls -la
       - uses: actions/upload-artifact@v4
         with:
-          name: LolosReceitas-${{ matrix.name }}
+          name: RecipeCollector-${{ matrix.name }}
           path: out/*
       - name: Attach to release
         if: github.event_name == 'release'

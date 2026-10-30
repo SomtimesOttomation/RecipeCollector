@@ -1,4 +1,4 @@
-//! Core of Lolo's Receitas: the on-disk recipe library.
+//! Core of Recipe Collector: the on-disk recipe library.
 //!
 //! A library is a folder holding `library.db` (SQLite) and an `images/`
 //! folder with one sub-folder per recipe.
@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-pub const LIBRARY_FOLDER_NAME: &str = "Lolo's Receitas";
+pub const LIBRARY_FOLDER_NAME: &str = "Recipe Collector";
 const SCHEMA_VERSION: i64 = 1;
 
 #[derive(Debug, thiserror::Error)]
@@ -205,9 +205,9 @@ mod tests {
     }
 
     #[test]
-    fn handles_apostrophe_in_path() {
+    fn handles_space_in_path() {
         let root = temp_root("apos").join(LIBRARY_FOLDER_NAME);
         let lib = Library::open(&root).unwrap();
-        assert!(lib.info().unwrap().path.contains("Lolo's Receitas"));
+        assert!(lib.info().unwrap().path.contains("Recipe Collector"));
     }
 }

@@ -1,8 +1,8 @@
 [package]
-name = "receitas-core"
+name = "recipe-core"
 version = "0.1.0"
 edition = "2021"
-description = "Library storage (and later recipe import) for Lolo's Receitas, kept free of UI code so it builds and tests anywhere."
+description = "Library storage (and later recipe import) for Recipe Collector, kept free of UI code so it builds and tests anywhere."
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }

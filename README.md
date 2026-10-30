@@ -1,4 +1,4 @@
-# Lolo's Receitas
+# Recipe Collector
 
 A desktop recipe collector for Windows and macOS. Paste a recipe link and it becomes a clean, fully editable recipe page with an ingredients card, a steps card and the photos saved locally.
 
@@ -17,7 +17,7 @@ Installers are attached to each [release](../../releases):
 
 ## Your recipes
 
-Recipes are stored in `Documents/Lolo's Receitas` (a `library.db` file plus an `images` folder), so they're easy to back up.
+Recipes are stored in `Documents/Recipe Collector` (a `library.db` file plus an `images` folder), so they're easy to back up.
 
 ## Building from source
 

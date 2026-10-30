@@ -6,7 +6,7 @@
   <div class="drag" data-tauri-drag-region></div>
   <div class="brand">
     <span class="logo">🍲</span>
-    <span class="name">Lolo's Receitas</span>
+    <span class="name">Recipe Collector</span>
   </div>
 
   <button class:active={view === "library"} onclick={() => (view = "library")}>

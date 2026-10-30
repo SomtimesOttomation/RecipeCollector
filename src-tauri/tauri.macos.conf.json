@@ -2,7 +2,7 @@
   "app": {
     "windows": [
       {
-        "title": "Lolo's Receitas",
+        "title": "Recipe Collector",
         "width": 1180,
         "height": 780,
         "minWidth": 760,
