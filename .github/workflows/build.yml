@@ -76,7 +76,8 @@ jobs:
           set -o pipefail
           npx tauri build ${{ matrix.args }} 2>&1 | tee build.log || {
             # Surface the end of the log as annotations so failures are readable anywhere.
-            tail -n 40 build.log | sed 's/\x1b\[[0-9;]*m//g' | while IFS= read -r l; do echo "::error::$l"; done
+            msg=$( (grep -iE -A4 "error|failed|warning: unused" build.log || tail -n 40 build.log) | sed 's/\x1b\[[0-9;]*m//g' | tail -n 60 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=Build failed::$msg"
             exit 1
           }
       - name: Collect installers and checksums
