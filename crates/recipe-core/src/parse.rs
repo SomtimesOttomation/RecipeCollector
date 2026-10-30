@@ -39,6 +39,8 @@ pub struct ParsedRecipe {
     pub ingredients: Vec<Section>,
     pub steps: Vec<Section>,
     pub images: Vec<String>,
+    /// A YouTube link for the recipe, when the page has one.
+    pub video_url: Option<String>,
     pub json_ld: Option<String>,
     pub method: ParseMethod,
 }
@@ -79,6 +81,9 @@ pub fn parse_page(html: &str, page_url: &str) -> ParsedRecipe {
         .or_else(|| meta(&doc, "og:site_name"))
         .or_else(|| base.as_ref().and_then(|u| u.host_str()).map(|h| h.trim_start_matches("www.").to_string()));
     r.source_url = Some(page_url.to_string());
+    if r.video_url.is_none() {
+        r.video_url = find_youtube_in_page(html);
+    }
 
     // Absolute, de-duplicated image URLs.
     let mut seen = Vec::new();
@@ -167,8 +172,60 @@ fn recipe_from_value(v: &Value) -> ParsedRecipe {
         ingredients: if ingredients.is_empty() { vec![] } else { vec![Section { title: None, items: ingredients }] },
         steps: instructions_of(v.get("recipeInstructions")),
         images: images_of(v.get("image")),
+        video_url: v.get("video").and_then(video_of),
         ..Default::default()
     }
+}
+
+fn video_of(v: &Value) -> Option<String> {
+    match v {
+        Value::Array(a) => a.iter().find_map(video_of),
+        Value::String(s) => youtube_watch_url(s),
+        Value::Object(_) => ["embedUrl", "contentUrl", "url"]
+            .iter()
+            .filter_map(|k| v.get(*k).and_then(Value::as_str))
+            .find_map(youtube_watch_url),
+        _ => None,
+    }
+}
+
+/// Any YouTube link or embed found in the raw page (iframes, links, scripts).
+fn find_youtube_in_page(html: &str) -> Option<String> {
+    let needles = ["youtube.com/embed/", "youtube-nocookie.com/embed/", "youtube.com/watch?v=", "youtu.be/", "youtube.com/shorts/"];
+    let mut best: Option<usize> = None;
+    for n in needles {
+        if let Some(pos) = html.find(n) {
+            best = Some(best.map_or(pos, |b| b.min(pos)));
+        }
+    }
+    let start = best?;
+    // Walk back to the start of the URL, then take it up to a delimiter.
+    let begin = html[..start].rfind(|c: char| c == '"' || c == '\'' || c == '(' || c.is_whitespace()).map_or(0, |i| i + 1);
+    let rest = &html[begin..];
+    let end = rest.find(|c: char| c == '"' || c == '\'' || c == '<' || c == ')' || c.is_whitespace()).unwrap_or(rest.len());
+    youtube_watch_url(&rest[..end].replace("\\/", "/").replace("&amp;", "&"))
+}
+
+/// Normalises any YouTube URL form to https://www.youtube.com/watch?v=ID.
+pub fn youtube_watch_url(s: &str) -> Option<String> {
+    let s = s.trim();
+    let s = if s.starts_with("//") { format!("https:{s}") } else if !s.starts_with("http") { format!("https://{s}") } else { s.to_string() };
+    let u = Url::parse(&s).ok()?;
+    let host = u.host_str()?.trim_start_matches("www.").trim_start_matches("m.");
+    let id = match host {
+        "youtu.be" => u.path_segments()?.next().map(str::to_string),
+        "youtube.com" | "youtube-nocookie.com" | "music.youtube.com" => {
+            let mut segs = u.path_segments()?;
+            match segs.next() {
+                Some("watch") => u.query_pairs().find(|(k, _)| k == "v").map(|(_, v)| v.into_owned()),
+                Some("embed") | Some("shorts") | Some("live") | Some("v") => segs.next().map(str::to_string),
+                _ => None,
+            }
+        }
+        _ => None,
+    }?;
+    let ok = id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    ok.then(|| format!("https://www.youtube.com/watch?v={id}"))
 }
 
 fn text_of(v: &Value) -> Option<String> {
@@ -691,6 +748,35 @@ mod tests {
         let r = parse_page("<html><head><title>Just a blog</title></head><body><p>hi</p></body></html>", "https://x.com/");
         assert_eq!(r.title, "Just a blog");
         assert!(!r.has_content());
+    }
+
+    #[test]
+    fn youtube_links() {
+        let id = "dQw4w9WgXcQ";
+        let want = Some(format!("https://www.youtube.com/watch?v={id}"));
+        for form in [
+            format!("https://www.youtube.com/watch?v={id}&t=30s"),
+            format!("https://youtu.be/{id}?si=abc"),
+            format!("https://www.youtube-nocookie.com/embed/{id}?rel=0"),
+            format!("//www.youtube.com/embed/{id}"),
+            format!("https://youtube.com/shorts/{id}"),
+        ] {
+            assert_eq!(youtube_watch_url(&form), want, "{form}");
+        }
+        assert_eq!(youtube_watch_url("https://vimeo.com/123"), None);
+        assert_eq!(youtube_watch_url("https://www.youtube.com/@channel"), None);
+    }
+
+    #[test]
+    fn finds_video_in_json_ld_or_page() {
+        let html = r#"<script type="application/ld+json">{"@type":"Recipe","name":"A","recipeIngredient":["x"],
+          "video":{"@type":"VideoObject","embedUrl":"https://www.youtube.com/embed/abcdefghijk"}}</script>"#;
+        assert_eq!(parse_page(html, "https://a.com/").video_url.as_deref(), Some("https://www.youtube.com/watch?v=abcdefghijk"));
+        let html = r#"<script type="application/ld+json">{"@type":"Recipe","name":"B","recipeIngredient":["x"]}</script>
+          <iframe src="https://www.youtube.com/embed/ABCDEFGHIJK?feature=oembed"></iframe>"#;
+        assert_eq!(parse_page(html, "https://b.com/").video_url.as_deref(), Some("https://www.youtube.com/watch?v=ABCDEFGHIJK"));
+        let html = r#"<script type="application/ld+json">{"@type":"Recipe","name":"C","recipeIngredient":["x"]}</script>"#;
+        assert_eq!(parse_page(html, "https://c.com/").video_url, None);
     }
 
     #[test]
