@@ -4,7 +4,7 @@
 
   let { onopen }: { onopen: (id: number) => void } = $props();
 
-  let recipes: RecipeSummary[] = $state([]);
+  let recipes = $state<RecipeSummary[]>([]);
   let url = $state("");
   let busy = $state(false);
   let error = $state("");

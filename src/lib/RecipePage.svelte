@@ -7,9 +7,9 @@
 
   let { id, onclose }: { id: number; onclose: () => void } = $props();
 
-  let recipe: Recipe | null = $state(null);
+  let recipe = $state<Recipe | null>(null);
   let loadError = $state("");
-  let status: "" | "saving" | "saved" | "error" = $state("");
+  let status = $state<"" | "saving" | "saved" | "error">("");
   let saveError = $state("");
   let lastSaved = "";
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -167,7 +167,10 @@
     return { destroy: () => node.removeEventListener("input", fit) };
   }
 
-  let hero = $derived(recipe?.images.find((i) => i.is_hero) ?? recipe?.images[0] ?? null);
+  let hero = $derived.by(() => {
+    const r = recipe as Recipe | null;
+    return r ? (r.images.find((i) => i.is_hero) ?? r.images[0] ?? null) : null;
+  });
 </script>
 
 {#if loadError}
