@@ -16,6 +16,7 @@
     "allow-import-recipe",
     "allow-open-import-browser",
     "allow-import-page-html",
+    "allow-save-debug-page",
     "allow-get-recipe",
     "allow-update-recipe",
     "allow-delete-recipe",

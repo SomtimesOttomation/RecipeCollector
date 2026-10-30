@@ -12,6 +12,7 @@ All notable changes to Recipe Collector. Each entry is labelled Feature, Bug/Fix
 - Editable recipe page: ingredients and steps cards, times, servings, notes and photos, saved automatically
 - Built-in browser to import from sites that block automatic downloads
 - In-app updates: checks GitHub releases and installs new versions
+- Save a page for import analysis from the built-in browser
 
 **Bug/Fix**
 - Windows installer installs per user, so no admin (UAC) prompt

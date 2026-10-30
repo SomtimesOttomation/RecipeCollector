@@ -315,6 +315,26 @@ impl Library {
         self.touch(recipe_id)
     }
 
+    /// Saves a page and its import report into the library's `debug` folder.
+    /// Returns the path of the report.
+    pub fn save_debug_page(&self, html: &str, url: &str) -> Result<PathBuf> {
+        let dir = self.root.join("debug");
+        std::fs::create_dir_all(&dir)?;
+        let host: String = url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()))
+            .unwrap_or_else(|| "page".into())
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+            .collect();
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let base = format!("{stamp}-{host}");
+        std::fs::write(dir.join(format!("{base}.html")), html)?;
+        let report_path = dir.join(format!("{base}-report.txt"));
+        std::fs::write(&report_path, parse::diagnose(html, url))?;
+        Ok(report_path)
+    }
+
     fn touch(&self, recipe_id: i64) -> Result<()> {
         self.conn.execute("UPDATE recipes SET updated_at=datetime('now') WHERE id=?1", [recipe_id])?;
         Ok(())
@@ -556,6 +576,16 @@ mod tests {
         lib.delete_recipe(id).unwrap();
         assert!(matches!(lib.get_recipe(id), Err(Error::NotFound)));
         assert!(!Path::new(&a.path).exists());
+    }
+
+    #[test]
+    fn saves_debug_page() {
+        let lib = Library::open(temp_root("debug")).unwrap();
+        let report = lib.save_debug_page("<html><title>Hi</title></html>", "https://www.example.com/a?b=c").unwrap();
+        assert!(report.exists());
+        assert!(report.file_name().unwrap().to_string_lossy().ends_with("-example.com-report.txt"));
+        let html = report.with_file_name(report.file_name().unwrap().to_string_lossy().replace("-report.txt", ".html"));
+        assert!(html.exists());
     }
 
     #[test]

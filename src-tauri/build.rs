@@ -7,6 +7,7 @@ const COMMANDS: &[&str] = &[
     "import_recipe",
     "open_import_browser",
     "import_page_html",
+    "save_debug_page",
     "get_recipe",
     "update_recipe",
     "delete_recipe",
