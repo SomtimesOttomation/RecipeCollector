@@ -4,6 +4,8 @@ All notable changes to Recipe Collector. Each entry is labelled Feature, Bug/Fix
 
 ## Unreleased
 
+## 0.2.0
+
 **Feature**
 - App skeleton: sidebar with Library and Settings, light/dark/system themes, native window styling on Windows and macOS
 - Recipe library created automatically in Documents/Recipe Collector (database + images folder)
