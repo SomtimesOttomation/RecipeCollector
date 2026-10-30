@@ -106,6 +106,12 @@ async fn import_page_html(html: String, url: String, app: AppHandle) -> Result<i
     Ok(id)
 }
 
+/// System print dialog for the main window (window.print() doesn't work in every webview).
+#[tauri::command]
+async fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(err)
+}
+
 #[tauri::command]
 fn get_recipe(id: i64, state: State<AppState>) -> Result<Recipe, String> {
     state.with(|l| l.get_recipe(id))
