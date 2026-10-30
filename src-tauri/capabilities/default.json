@@ -9,6 +9,18 @@
     "core:default",
     "core:window:allow-start-dragging",
     "opener:default",
-    "dialog:default"
+    "dialog:default",
+    "allow-library-info",
+    "allow-list-recipes",
+    "allow-reveal-library",
+    "allow-import-recipe",
+    "allow-open-import-browser",
+    "allow-import-page-html",
+    "allow-get-recipe",
+    "allow-update-recipe",
+    "allow-delete-recipe",
+    "allow-add-image-from-file",
+    "allow-set-hero",
+    "allow-remove-image"
   ]
 }

@@ -147,3 +147,19 @@ export async function openLink(url: string): Promise<void> {
   const { openUrl } = await import("@tauri-apps/plugin-opener");
   await openUrl(url);
 }
+
+/** Opens the page in the in-app browser so the user can import it from there. */
+export async function openImportBrowser(url: string): Promise<void> {
+  if (!inTauri) {
+    window.open(url, "_blank");
+    return;
+  }
+  return invoke("open_import_browser", { url });
+}
+
+/** Calls back with the new recipe id when an import finishes in the in-app browser. */
+export async function onBrowserImport(handler: (id: number) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<number>("recipe-imported", (e) => handler(e.payload));
+}
