@@ -1,13 +1,19 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { libraryInfo, revealLibrary, type LibraryInfo } from "./api";
+  import { libraryInfo, revealLibrary, appVersion, autoCheckEnabled, setAutoCheck, openLink, type LibraryInfo } from "./api";
+  import { updates, runCheck, runInstall } from "./updates.svelte";
   import type { Theme } from "./theme";
 
   let { theme = $bindable() }: { theme: Theme } = $props();
   let info: LibraryInfo | null = $state(null);
   let error = $state("");
+  let version = $state("");
+  let autoCheck = $state(autoCheckEnabled());
+
+  $effect(() => setAutoCheck(autoCheck));
 
   onMount(async () => {
+    version = await appVersion();
     try {
       info = await libraryInfo();
     } catch (e) {
@@ -46,7 +52,49 @@
   {/if}
 </section>
 
+<section class="card">
+  <h2>Updates</h2>
+  <p class="muted">You have version {version}.</p>
+  {#if updates.status?.state === "available"}
+    {@const s = updates.status}
+    <p><strong>Version {s.latest} is available.</strong></p>
+    {#if s.notes}<pre class="notes">{s.notes}</pre>{/if}
+    <div class="row">
+      {#if s.installer_url}
+        <button class="primary" disabled={updates.installing} onclick={runInstall}>
+          {updates.installing ? "Downloading…" : "Install update"}
+        </button>
+      {/if}
+      <button class="link" onclick={() => openLink(s.page_url)}>Open release page</button>
+    </div>
+  {:else if updates.status?.state === "up_to_date"}
+    <p class="muted">You're up to date.</p>
+  {:else if updates.status?.state === "unavailable"}
+    <p class="muted">{updates.status.reason}</p>
+  {/if}
+  {#if updates.error}<p class="err">{updates.error}</p>{/if}
+  <div class="row">
+    <button class="secondary" disabled={updates.checking} onclick={runCheck}>
+      {updates.checking ? "Checking…" : "Check for updates"}
+    </button>
+    <label class="check"><input type="checkbox" bind:checked={autoCheck} /> Check when the app starts</label>
+  </div>
+</section>
+
 <style>
+  .row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+  .primary, .secondary {
+    border: 0; border-radius: var(--radius-sm); padding: 7px 14px; font-weight: 600;
+  }
+  .primary { background: var(--accent); color: #fff; }
+  .secondary { background: var(--surface-2); }
+  .primary:disabled, .secondary:disabled { opacity: 0.6; cursor: default; }
+  .check { display: inline-flex; gap: 6px; align-items: center; color: var(--text-2); }
+  .notes {
+    white-space: pre-wrap; font: inherit; font-size: 13px; color: var(--text-2);
+    background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; margin: 8px 0 0;
+    max-height: 200px; overflow: auto; user-select: text;
+  }
   h1 { font-family: var(--font-display); font-size: 30px; margin: 0 0 18px; }
   .card {
     background: var(--surface);

@@ -20,15 +20,39 @@
         .go{background:#c2553a;color:#fff}
         .go:disabled{opacity:.6;cursor:default}
         .x{background:transparent;color:#faf7f2;opacity:.7;padding:8px}
+        .dbg{background:transparent;color:#faf7f2;opacity:.75;font-weight:500;padding:8px 6px}
+        .dbg:hover{opacity:1;text-decoration:underline}
       </style>
       <div class="bar">
         <span class="msg">Close any pop-ups, then</span>
         <button class="go">Import this page</button>
+        <button class="dbg" title="Save this page and a report to the library's debug folder">Save for analysis</button>
         <button class="x" title="Hide">✕</button>
       </div>`;
     const msg = root.querySelector(".msg");
     const go = root.querySelector(".go");
+    const dbg = root.querySelector(".dbg");
     root.querySelector(".x").onclick = () => host.remove();
+
+    dbg.onclick = async () => {
+      const ipc = window.__TAURI_INTERNALS__;
+      if (!ipc) {
+        msg.textContent = "Couldn't connect to Recipe Collector.";
+        return;
+      }
+      dbg.disabled = true;
+      try {
+        await ipc.invoke("save_debug_page", {
+          html: document.documentElement.outerHTML,
+          url: location.href,
+        });
+        msg.textContent = "Saved to the debug folder. Send both files for analysis.";
+      } catch (e) {
+        msg.textContent = String(e);
+      } finally {
+        dbg.disabled = false;
+      }
+    };
 
     go.onclick = async () => {
       const ipc = window.__TAURI_INTERNALS__;

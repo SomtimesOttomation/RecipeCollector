@@ -172,3 +172,56 @@ export function youtubeId(url: string | null): string | null {
   const m = url.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
 }
+
+/** Opens the system print dialog for the current page. */
+export async function printPage(): Promise<void> {
+  if (!inTauri) {
+    window.print();
+    return;
+  }
+  return invoke("print_page");
+}
+
+export type UpdateStatus =
+  | { state: "up_to_date"; current: string; latest: string }
+  | {
+      state: "available";
+      current: string;
+      latest: string;
+      notes: string;
+      page_url: string;
+      installer_url: string | null;
+      checksum_url: string | null;
+    }
+  | { state: "unavailable"; current: string; reason: string };
+
+export async function appVersion(): Promise<string> {
+  if (!inTauri) return "0.1.0";
+  return invoke<string>("app_version");
+}
+
+export async function checkForUpdate(): Promise<UpdateStatus> {
+  if (!inTauri) return { state: "unavailable", current: "0.1.0", reason: "Updates are checked in the installed app." };
+  return invoke<UpdateStatus>("check_for_update");
+}
+
+export async function installUpdate(installerUrl: string, checksumUrl: string | null): Promise<void> {
+  if (!inTauri) return;
+  return invoke("install_update", { installerUrl, checksumUrl });
+}
+
+const AUTO_KEY = "rc.autoUpdateCheck";
+export function autoCheckEnabled(): boolean {
+  try {
+    return localStorage.getItem(AUTO_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+export function setAutoCheck(on: boolean) {
+  try {
+    localStorage.setItem(AUTO_KEY, on ? "on" : "off");
+  } catch {}
+}
+
+export const isMacPlatform = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);

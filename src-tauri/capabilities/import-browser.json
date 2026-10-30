@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "import-browser",
-  "description": "In-app browser for importing from sites that block automatic downloads. Websites shown here can only send the page to the app.",
+  "description": "In-app browser for importing from sites that block automatic downloads. Websites shown here can only send the page to the app (to import it or save it for analysis).",
   "windows": [
     "importer"
   ],
@@ -14,6 +14,7 @@
     ]
   },
   "permissions": [
-    "allow-import-page-html"
+    "allow-import-page-html",
+    "allow-save-debug-page"
   ]
 }

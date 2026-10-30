@@ -448,6 +448,91 @@ fn list_after(start: ElementRef) -> Vec<String> {
     vec![]
 }
 
+// ---------- Diagnostics ----------
+
+/// A plain-text report of what the importer can see on a page, saved next to the
+/// page itself so a failing site can be analysed later.
+pub fn diagnose(html: &str, page_url: &str) -> String {
+    use std::fmt::Write;
+    let doc = Html::parse_document(html);
+    let mut out = String::new();
+    let _ = writeln!(out, "Recipe Collector import report");
+    let _ = writeln!(out, "Page: {page_url}");
+    let _ = writeln!(out, "Page size: {} KB", html.len() / 1024);
+    let _ = writeln!(out);
+
+    // Structured data blocks and their types.
+    let sel = Selector::parse(r#"script[type="application/ld+json"]"#).unwrap();
+    let blocks: Vec<String> = doc.select(&sel).map(|s| s.text().collect()).collect();
+    let _ = writeln!(out, "JSON-LD blocks: {}", blocks.len());
+    for (i, raw) in blocks.iter().enumerate() {
+        match parse_json_lenient(raw) {
+            Some(v) => {
+                let mut types = vec![];
+                collect_types(&v, &mut types);
+                types.dedup();
+                let _ = writeln!(out, "  #{}: types [{}]{}", i + 1, types.join(", "),
+                    if find_recipe(&v).is_some() { "  <- contains a Recipe" } else { "" });
+            }
+            None => {
+                let _ = writeln!(out, "  #{}: could not be read as JSON ({} chars)", i + 1, raw.len());
+            }
+        }
+    }
+    let micro = Selector::parse(r#"[itemtype*="schema.org/Recipe"]"#).unwrap();
+    let _ = writeln!(out, "Microdata Recipe blocks: {}", doc.select(&micro).count());
+    let plugins = [("wprm-recipe", "WP Recipe Maker"), ("tasty-recipes", "Tasty Recipes"), ("mv-create", "Mediavine Create"), ("recipe-card", "generic recipe card")];
+    for (needle, name) in plugins {
+        if html.contains(needle) {
+            let _ = writeln!(out, "Recipe plugin markers: {name}");
+        }
+    }
+    let _ = writeln!(out);
+
+    let r = parse_page(html, page_url);
+    let _ = writeln!(out, "Result: {:?}", r.method);
+    let _ = writeln!(out, "Title: {}", r.title);
+    let _ = writeln!(out, "Servings: {}", r.servings.as_deref().unwrap_or("-"));
+    let _ = writeln!(out, "Times (min): prep {:?}, cook {:?}, total {:?}", r.prep_min, r.cook_min, r.total_min);
+    let ing: usize = r.ingredients.iter().map(|s| s.items.len()).sum();
+    let steps: usize = r.steps.iter().map(|s| s.items.len()).sum();
+    let _ = writeln!(out, "Ingredients found: {ing}");
+    for s in &r.ingredients {
+        if let Some(t) = &s.title { let _ = writeln!(out, "  [{t}]"); }
+        for i in s.items.iter().take(40) { let _ = writeln!(out, "  - {i}"); }
+    }
+    let _ = writeln!(out, "Steps found: {steps}");
+    for s in &r.steps {
+        if let Some(t) = &s.title { let _ = writeln!(out, "  [{t}]"); }
+        for (n, i) in s.items.iter().take(40).enumerate() {
+            let short: String = i.chars().take(160).collect();
+            let _ = writeln!(out, "  {}. {short}", n + 1);
+        }
+    }
+    let _ = writeln!(out, "Images found: {}", r.images.len());
+    for i in r.images.iter().take(10) { let _ = writeln!(out, "  {i}"); }
+    out
+}
+
+fn collect_types(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(map) => {
+            match map.get("@type") {
+                Some(Value::String(s)) => out.push(s.clone()),
+                Some(Value::Array(a)) => out.extend(a.iter().filter_map(|x| x.as_str().map(str::to_string))),
+                _ => {}
+            }
+            for (k, child) in map {
+                if k != "@type" && matches!(child, Value::Object(_) | Value::Array(_)) && out.len() < 40 {
+                    collect_types(child, out);
+                }
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|x| collect_types(x, out)),
+        _ => {}
+    }
+}
+
 // ---------- Pinterest ----------
 
 pub fn is_pinterest(url: &str) -> bool {
@@ -692,6 +777,19 @@ mod tests {
         assert_eq!(parse_page(html, "https://b.com/").video_url.as_deref(), Some("https://www.youtube.com/watch?v=ABCDEFGHIJK"));
         let html = r#"<script type="application/ld+json">{"@type":"Recipe","name":"C","recipeIngredient":["x"]}</script>"#;
         assert_eq!(parse_page(html, "https://c.com/").video_url, None);
+    }
+
+    #[test]
+    fn diagnostics_report() {
+        let html = r#"<script type="application/ld+json">{"@graph":[{"@type":"WebSite"},{"@type":"Recipe","name":"Soup","recipeIngredient":["water"]}]}</script>
+          <script type="application/ld+json">{broken</script><div class="wprm-recipe"></div>"#;
+        let report = diagnose(html, "https://x.com/soup");
+        assert!(report.contains("JSON-LD blocks: 2"));
+        assert!(report.contains("contains a Recipe"));
+        assert!(report.contains("could not be read as JSON"));
+        assert!(report.contains("WP Recipe Maker"));
+        assert!(report.contains("Ingredients found: 1"));
+        assert!(report.contains("- water"));
     }
 
     #[test]
