@@ -1,2 +1,2 @@
-# LolosReceitas
+# RecipeCollector
 Recipe Collector
