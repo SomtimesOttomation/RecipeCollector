@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { importRecipe, openImportBrowser, onBrowserImport, photoUrl } from "./api";
-  import { lib, refresh, inScope, scopeName, currentFolderId, moveTo, isRecipeDrag, RECIPE_DRAG } from "./store.svelte";
+  import { lib, refresh, inScope, scopeName, currentFolderId, moveTo, isRecipeDrag, RECIPE_DRAG, search, searchActive, searchResults, clearSearch } from "./store.svelte";
+  import SearchBar from "./SearchBar.svelte";
 
   let { onopen }: { onopen: (id: number) => void } = $props();
 
-  let shown = $derived(lib.recipes.filter((r) => inScope(r, lib.scope)));
+  let searching = $derived(searchActive());
+  let shown = $derived(searching ? searchResults() : lib.recipes.filter((r) => inScope(r, lib.scope)));
   let url = $state("");
   let busy = $state(false);
   let error = $state("");
@@ -92,7 +94,8 @@
 />
 
 <header>
-  <h1>{scopeName(lib.scope)}</h1>
+  <SearchBar />
+  <h1>{searching ? "Search results" : scopeName(lib.scope)}</h1>
   <form class="add" class:busy onsubmit={submit}>
     <input
       type="text"
@@ -124,7 +127,13 @@
   <div class="dropzone">Drop the link to add the recipe</div>
 {/if}
 
-{#if lib.loaded && lib.recipes.length > 0 && shown.length === 0}
+{#if searching && shown.length === 0}
+  <section class="empty">
+    <div class="plate">🔍</div>
+    <h2>No matches</h2>
+    <p>Try fewer words or fewer filters. <button class="inline" onclick={clearSearch}>Clear search</button></p>
+  </section>
+{:else if lib.loaded && lib.recipes.length > 0 && shown.length === 0}
   <section class="empty">
     <div class="plate">📁</div>
     <h2>Nothing here yet</h2>
@@ -300,5 +309,6 @@
     color: var(--accent);
   }
   .site { font-size: 12px; color: var(--text-2); }
+  .inline { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 600; }
   .card-tags { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; font-size: 11.5px; color: var(--text-2); }
 </style>

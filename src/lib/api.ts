@@ -13,6 +13,7 @@ export interface RecipeSummary {
   title: string;
   total_min: number | null;
   site_name: string | null;
+  author: string | null;
   hero_image: string | null;
   folder_id: number | null;
   tags: string[];
@@ -93,7 +94,7 @@ export async function libraryInfo(): Promise<LibraryInfo> {
 }
 
 export async function listRecipes(): Promise<RecipeSummary[]> {
-  if (!inTauri) return [{ id: 1, title: sample.title, total_min: 45, site_name: "example.com", hero_image: null, folder_id: null, tags: ["Soup", "Portuguese"] }];
+  if (!inTauri) return [{ id: 1, title: sample.title, total_min: 45, site_name: "example.com", author: null, hero_image: null, folder_id: null, tags: ["Soup", "Portuguese"] }];
   return invoke<RecipeSummary[]>("list_recipes");
 }
 
@@ -298,4 +299,10 @@ export async function confirmDeleteTag(name: string): Promise<boolean> {
   if (!inTauri) return window.confirm(text);
   const { ask } = await import("@tauri-apps/plugin-dialog");
   return ask(text, { title: "Delete tag", kind: "warning" });
+}
+
+/** Ids of recipes matching every word, best matches first. */
+export async function searchRecipes(query: string): Promise<number[]> {
+  if (!inTauri) return query.toLowerCase().split(/\s+/).every((w) => "caldo verde potatoes kale soup".includes(w)) ? [1] : [];
+  return invoke<number[]>("search_recipes", { query });
 }

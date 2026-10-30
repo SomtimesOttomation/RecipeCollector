@@ -53,6 +53,7 @@ pub struct RecipeSummary {
     pub title: String,
     pub total_min: Option<i64>,
     pub site_name: Option<String>,
+    pub author: Option<String>,
     /// Absolute path of the cover photo, if any.
     pub hero_image: Option<String>,
     /// The folder the recipe is in; none means not in a folder.
@@ -141,20 +142,21 @@ impl Library {
             "SELECT r.id, r.title, r.total_min, r.site_name,
                     (SELECT file_name FROM images i WHERE i.recipe_id = r.id
                      ORDER BY i.is_hero DESC, i.position LIMIT 1),
-                    r.folder_id
+                    r.folder_id, r.author
              FROM recipes r ORDER BY r.updated_at DESC, r.id DESC",
         )?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<String>>(4)?, r.get(5)?))
+            Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<String>>(4)?, r.get(5)?, r.get(6)?))
         })?;
         let mut out = vec![];
         for row in rows {
-            let (id, title, total_min, site_name, file, folder_id) = row?;
+            let (id, title, total_min, site_name, file, folder_id, author) = row?;
             out.push(RecipeSummary {
                 id,
                 title,
                 total_min,
                 site_name,
+                author,
                 hero_image: file.map(|f| self.images_dir(id).join(f).display().to_string()),
                 folder_id,
                 tags: vec![],
@@ -471,6 +473,40 @@ impl Library {
     pub fn delete_tag(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM tags WHERE id = ?1", [id])?;
         Ok(())
+    }
+
+    // ---------- Search ----------
+
+    /// Ids of recipes containing every word of `query` anywhere: title, description, notes,
+    /// author, site, ingredients, steps or tags. Title matches come first.
+    pub fn search(&self, query: &str) -> Result<Vec<i64>> {
+        let words: Vec<String> = query.split_whitespace().map(|w| w.to_lowercase()).filter(|w| !w.is_empty()).take(10).collect();
+        if words.is_empty() {
+            return Ok(vec![]);
+        }
+        let conds: Vec<String> = (1..=words.len()).map(|i| format!("hay LIKE ?{i} ESCAPE '\\'")).collect();
+        let first_title = format!("lower(title) LIKE ?{}  ESCAPE '\\'", words.len() + 1);
+        let sql = format!(
+            "WITH h AS (
+               SELECT r.id, r.title, r.updated_at, lower(
+                 r.title || ' ' || COALESCE(r.description,'') || ' ' || COALESCE(r.notes,'') || ' ' ||
+                 COALESCE(r.author,'') || ' ' || COALESCE(r.site_name,'') || ' ' ||
+                 COALESCE((SELECT group_concat(i.raw_text, ' ') FROM ingredients i
+                           JOIN ingredient_sections s ON s.id = i.section_id WHERE s.recipe_id = r.id), '') || ' ' ||
+                 COALESCE((SELECT group_concat(st.text, ' ') FROM steps st WHERE st.recipe_id = r.id), '') || ' ' ||
+                 COALESCE((SELECT group_concat(t.name, ' ') FROM recipe_tags rt JOIN tags t ON t.id = rt.tag_id
+                           WHERE rt.recipe_id = r.id), '')
+               ) AS hay FROM recipes r)
+             SELECT id FROM h WHERE {} ORDER BY ({}) DESC, updated_at DESC, id DESC",
+            conds.join(" AND "),
+            first_title
+        );
+        let escape = |w: &str| w.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let mut params: Vec<String> = words.iter().map(|w| format!("%{}%", escape(w))).collect();
+        params.push(format!("%{}%", escape(&words[0])));
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     fn touch(&self, recipe_id: i64) -> Result<()> {
@@ -816,6 +852,30 @@ mod tests {
         let soup = lib.list_tags().unwrap().into_iter().find(|t| t.name == "Soup").unwrap();
         lib.delete_tag(soup.id).unwrap();
         assert_eq!(lib.get_recipe(b).unwrap().tags, vec!["Comfort food"]);
+    }
+
+    #[test]
+    fn search() {
+        let mut lib = Library::open(temp_root("search")).unwrap();
+        let a = lib.save_parsed(&sample()).unwrap(); // Caldo verde: potatoes, kale, olive oil
+        let mut p = sample();
+        p.title = "Kale chips".into();
+        p.ingredients = vec![Section { title: None, items: vec!["1 bunch kale".into(), "50% less salt".into()] }];
+        p.steps = vec![Section { title: None, items: vec!["Bake until crisp.".into()] }];
+        p.tags = vec!["Snack".into()];
+        p.author = Some("Ana Silva".into());
+        let b = lib.save_parsed(&p).unwrap();
+
+        assert_eq!(lib.search("kale").unwrap(), vec![b, a], "title match first");
+        assert_eq!(lib.search("POTATOES").unwrap(), vec![a], "ignores case, searches ingredients");
+        assert_eq!(lib.search("kale crisp").unwrap(), vec![b], "every word must match");
+        assert_eq!(lib.search("snack").unwrap(), vec![b], "searches tags");
+        assert_eq!(lib.search("silva").unwrap(), vec![b], "searches author");
+        assert_eq!(lib.search("drizzle").unwrap(), vec![a], "searches steps");
+        assert_eq!(lib.search("50%").unwrap(), vec![b], "% is literal");
+        assert!(lib.search("%").unwrap().len() == 1);
+        assert!(lib.search("   ").unwrap().is_empty());
+        assert!(lib.search("chocolate").unwrap().is_empty());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // Shared library state: the sidebar, the grid and the recipe page all read from here,
 // so a move, rename or import shows up everywhere at once.
-import { listRecipes, listFolders, listTags, moveRecipe, type RecipeSummary, type Folder, type Tag } from "./api";
+import { listRecipes, listFolders, listTags, moveRecipe, searchRecipes, type RecipeSummary, type Folder, type Tag } from "./api";
 
 export type Scope = { kind: "all" } | { kind: "unfiled" } | { kind: "folder"; id: number } | { kind: "tag"; name: string };
 
@@ -59,4 +59,74 @@ export function draggedRecipe(e: DragEvent): number | null {
 
 export function isRecipeDrag(e: DragEvent) {
   return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes(RECIPE_DRAG);
+}
+
+// ---------- Search ----------
+
+export const search = $state({
+  query: "",
+  advanced: false,
+  tags: [] as string[], // recipe must have all of these
+  author: "",
+  site: "",
+  maxTime: 0, // minutes, 0 = any
+  folder: "any" as "any" | "none" | number,
+  /** Ids from the text search, in ranked order; null when there's no text query. */
+  hits: null as number[] | null,
+});
+
+export function searchActive() {
+  return (
+    search.query.trim() !== "" ||
+    search.tags.length > 0 ||
+    search.author !== "" ||
+    search.site !== "" ||
+    search.maxTime > 0 ||
+    search.folder !== "any"
+  );
+}
+
+let timer: ReturnType<typeof setTimeout> | undefined;
+let seq = 0;
+/** Runs the text search shortly after typing stops. */
+export function queueSearch() {
+  clearTimeout(timer);
+  const q = search.query.trim();
+  if (!q) {
+    search.hits = null;
+    return;
+  }
+  timer = setTimeout(async () => {
+    const mine = ++seq;
+    const ids = await searchRecipes(q);
+    if (mine === seq) search.hits = ids; // ignore answers to older queries
+  }, 200);
+}
+
+export function clearSearch() {
+  search.query = "";
+  search.tags = [];
+  search.author = "";
+  search.site = "";
+  search.maxTime = 0;
+  search.folder = "any";
+  search.hits = null;
+}
+
+/** Recipes matching the text search and every advanced filter, best text matches first. */
+export function searchResults(): RecipeSummary[] {
+  let list = lib.recipes;
+  if (search.hits) {
+    const byId = new Map(list.map((r) => [r.id, r]));
+    list = search.hits.map((id) => byId.get(id)).filter((r): r is RecipeSummary => !!r);
+  }
+  const lower = (s: string) => s.toLowerCase();
+  return list.filter(
+    (r) =>
+      search.tags.every((t) => r.tags.some((x) => lower(x) === lower(t))) &&
+      (!search.author || r.author === search.author) &&
+      (!search.site || r.site_name === search.site) &&
+      (!search.maxTime || (r.total_min !== null && r.total_min <= search.maxTime)) &&
+      (search.folder === "any" || (search.folder === "none" ? r.folder_id === null : r.folder_id === search.folder)),
+  );
 }
