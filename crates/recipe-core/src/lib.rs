@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub const LIBRARY_FOLDER_NAME: &str = "Recipe Collector";
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const MAX_IMAGE_EDGE: u32 = 2000;
 
 #[derive(Debug, thiserror::Error)]
@@ -77,6 +77,8 @@ pub struct Recipe {
     pub cook_min: Option<i64>,
     pub total_min: Option<i64>,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub video_url: Option<String>,
     pub ingredients: Vec<Section>,
     pub steps: Vec<Section>,
     #[serde(default)]
@@ -148,9 +150,9 @@ impl Library {
     pub fn save_parsed(&mut self, p: &ParsedRecipe) -> Result<i64> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO recipes (title, description, source_url, site_name, author, servings, prep_min, cook_min, total_min)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![p.title, p.description, p.source_url, p.site_name, p.author, p.servings, p.prep_min, p.cook_min, p.total_min],
+            "INSERT INTO recipes (title, description, source_url, site_name, author, servings, prep_min, cook_min, total_min, video_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![p.title, p.description, p.source_url, p.site_name, p.author, p.servings, p.prep_min, p.cook_min, p.total_min, p.video_url],
         )?;
         let id = tx.last_insert_rowid();
         write_sections(&tx, id, &p.ingredients, &p.steps)?;
@@ -166,7 +168,7 @@ impl Library {
         let mut r = self
             .conn
             .query_row(
-                "SELECT id, title, description, source_url, site_name, author, servings, prep_min, cook_min, total_min, notes
+                "SELECT id, title, description, source_url, site_name, author, servings, prep_min, cook_min, total_min, notes, video_url
                  FROM recipes WHERE id = ?1",
                 [id],
                 |r| {
@@ -182,6 +184,7 @@ impl Library {
                         cook_min: r.get(8)?,
                         total_min: r.get(9)?,
                         notes: r.get(10)?,
+                        video_url: r.get(11)?,
                         ..Default::default()
                     })
                 },
@@ -230,9 +233,9 @@ impl Library {
         let tx = self.conn.transaction()?;
         let changed = tx.execute(
             "UPDATE recipes SET title=?2, description=?3, source_url=?4, site_name=?5, author=?6, servings=?7,
-                    prep_min=?8, cook_min=?9, total_min=?10, notes=?11, updated_at=datetime('now')
+                    prep_min=?8, cook_min=?9, total_min=?10, notes=?11, video_url=?12, updated_at=datetime('now')
              WHERE id=?1",
-            params![r.id, r.title, r.description, r.source_url, r.site_name, r.author, r.servings, r.prep_min, r.cook_min, r.total_min, r.notes],
+            params![r.id, r.title, r.description, r.source_url, r.site_name, r.author, r.servings, r.prep_min, r.cook_min, r.total_min, r.notes, r.video_url],
         )?;
         if changed == 0 {
             return Err(Error::NotFound);
@@ -356,6 +359,9 @@ fn migrate(conn: &Connection) -> Result<()> {
     if version < 2 {
         conn.execute_batch("ALTER TABLE steps ADD COLUMN section_title TEXT;")?;
     }
+    if version < 3 {
+        conn.execute_batch("ALTER TABLE recipes ADD COLUMN video_url TEXT;")?;
+    }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
@@ -473,7 +479,7 @@ mod tests {
         assert!(root.join("images").is_dir());
         let info = lib.info().unwrap();
         assert_eq!(info.recipe_count, 0);
-        assert_eq!(info.schema_version, 2);
+        assert_eq!(info.schema_version, 3);
     }
 
     #[test]
@@ -500,7 +506,7 @@ mod tests {
             conn.execute("INSERT INTO recipes (title) VALUES ('Old')", []).unwrap();
         }
         let mut lib = Library::open(&root).unwrap();
-        assert_eq!(lib.info().unwrap().schema_version, 2);
+        assert_eq!(lib.info().unwrap().schema_version, 3);
         let id = lib.save_parsed(&sample()).unwrap();
         assert_eq!(lib.get_recipe(id).unwrap().steps.len(), 2);
     }
@@ -523,12 +529,14 @@ mod tests {
         let mut r = lib.get_recipe(id).unwrap();
         r.title = "Caldo verde da avó".into();
         r.notes = Some("Use good chouriço".into());
+        r.video_url = Some("https://www.youtube.com/watch?v=abcdefghijk".into());
         r.ingredients[0].items.push("2 cloves garlic".into());
         r.steps = vec![Section { title: None, items: vec!["Only one step now.".into()] }];
         lib.update_recipe(&r).unwrap();
         let again = lib.get_recipe(id).unwrap();
         assert_eq!(again.title, "Caldo verde da avó");
         assert_eq!(again.notes.as_deref(), Some("Use good chouriço"));
+        assert_eq!(again.video_url, r.video_url);
         assert_eq!(again.ingredients[0].items.len(), 3);
         assert_eq!(again.steps, r.steps);
     }

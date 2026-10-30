@@ -39,6 +39,7 @@ export interface Recipe {
   cook_min: number | null;
   total_min: number | null;
   notes: string | null;
+  video_url: string | null;
   ingredients: Section[];
   steps: Section[];
   images: ImageInfo[];
@@ -58,6 +59,7 @@ const sample: Recipe = {
   cook_min: 30,
   total_min: 45,
   notes: null,
+  video_url: null,
   ingredients: [{ title: null, items: ["1 lb potatoes", "4 cups kale, thinly sliced", "1 chouriço"] }],
   steps: [{ title: null, items: ["Boil the potatoes until soft.", "Blend, add the kale and simmer 5 minutes.", "Serve with chouriço slices."] }],
   images: [],
@@ -162,4 +164,11 @@ export async function onBrowserImport(handler: (id: number) => void): Promise<()
   if (!inTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<number>("recipe-imported", (e) => handler(e.payload));
+}
+
+/** The 11-character video id of a YouTube link, or null. */
+export function youtubeId(url: string | null): string | null {
+  if (!url) return null;
+  const m = url.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
 }

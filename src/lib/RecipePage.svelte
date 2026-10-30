@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import {
     getRecipe, updateRecipe, deleteRecipe, addImageFromFile, setHero, removeImage,
-    pickPhoto, confirmDelete, openLink, photoUrl, inTauri, type Recipe, type Section,
+    pickPhoto, confirmDelete, openLink, photoUrl, inTauri, youtubeId, type Recipe, type Section,
   } from "./api";
 
   let { id, onclose }: { id: number; onclose: () => void } = $props();
@@ -48,6 +48,7 @@
       ...r,
       title: r.title.trim() || "Untitled recipe",
       description: blank(r.description),
+      video_url: blank(r.video_url),
       servings: blank(r.servings),
       notes: blank(r.notes),
       prep_min: toNum(r.prep_min),
@@ -277,6 +278,23 @@
     </section>
   </div>
 
+  <section class="card video">
+    <h2>Video</h2>
+    {#if youtubeId(recipe.video_url)}
+      {@const vid = youtubeId(recipe.video_url)}
+      <button class="video-card" onclick={() => recipe?.video_url && openLink(recipe.video_url)} title="Watch on YouTube">
+        <img src={`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`} alt="" loading="lazy" />
+        <span class="play">▶</span>
+      </button>
+    {/if}
+    <div class="video-row">
+      <input bind:value={recipe.video_url} placeholder="Paste a YouTube link" />
+      {#if recipe.video_url && !youtubeId(recipe.video_url)}
+        <button class="link" onclick={() => recipe?.video_url && openLink(recipe.video_url)}>Open ↗</button>
+      {/if}
+    </div>
+  </section>
+
   <section class="card notes">
     <h2>Notes</h2>
     <textarea use:autosize bind:value={recipe.notes} rows="2" placeholder="Your tweaks, substitutions, who loved it…"></textarea>
@@ -373,7 +391,23 @@
     box-shadow: var(--shadow);
   }
   .card h2 { font-family: var(--font-display); font-size: 19px; margin: 0 0 12px; }
-  .notes, .photos { margin-top: 18px; }
+  .notes, .photos, .video { margin-top: 18px; }
+  .video-card {
+    position: relative; display: block; padding: 0; border: 0; background: #000;
+    width: 100%; max-width: 480px; aspect-ratio: 16 / 9; border-radius: var(--radius-sm); overflow: hidden; margin-bottom: 10px;
+  }
+  .video-card img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0.92; }
+  .video-card .play {
+    position: absolute; inset: 0; margin: auto; width: 64px; height: 44px; border-radius: 12px;
+    background: rgba(220, 30, 30, 0.92); color: #fff; display: grid; place-items: center; font-size: 20px;
+  }
+  .video-card:hover img { opacity: 1; }
+  .video-row { display: flex; gap: 10px; align-items: center; }
+  .video-row input {
+    flex: 1; max-width: 480px; border: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius-sm);
+    padding: 7px 10px; outline: none; font: inherit; font-size: 13.5px;
+  }
+  .video-row input:focus { border-color: var(--accent); }
   .missing { color: var(--text-2); font-size: 13px; margin: 0 0 8px; }
 
   .section + .section { margin-top: 14px; }
