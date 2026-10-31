@@ -4,6 +4,12 @@ All notable changes to Recipe Collector. Each entry is labelled Feature, Bug/Fix
 
 ## Unreleased
 
+## 0.3.1
+
+**Bug/Fix**
+- Dry ingredients like flour, sugar and butter convert to grams instead of ml
+- US spoon amounts keep quarter measures
+
 ## 0.3.0
 
 **Feature**
