@@ -130,12 +130,13 @@ function toUS(v: number, kind: Kind): string {
     return oz ? `${lb} lb ${oz} oz` : `${lb} lb`;
   }
   if (v < 15) {
-    const n = fraction(v / 5);
+    // Spoon sets come in ⅛, ¼, ½ and ¾, so never ⅓ or ⅔ of a spoon.
+    const tsp = v / 5;
+    const n = fraction(tsp < 1 ? Math.max(0.125, Math.round(tsp * 8) / 8) : Math.round(tsp * 4) / 4);
     return `${n} tsp`;
   }
   if (v < 60) {
-    // Spoons: nearest half tablespoon is as precise as anyone measures.
-    const n = fraction(Math.max(0.5, Math.round((v / 15) * 2) / 2));
+    const n = fraction(Math.max(0.25, Math.round((v / 15) * 4) / 4));
     return `${n} tbsp`;
   }
   if (v <= 1900) {
