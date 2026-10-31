@@ -12,7 +12,7 @@ Early development. Import recipes from most sites (with a built-in browser for t
 
 Installers are attached to each [release](../../releases):
 
-- **Windows:** setup `.exe`. Installs for your user only, so no admin prompt. If SmartScreen appears, choose **More info → Run anyway**.
+- **Windows:** setup `.exe`. Installs for your user only, so no admin prompt. If SmartScreen appears, choose **More info → Run anyway**. After the first install, use **Update now** inside the app; if you install a newer version by hand instead, choose **Do not uninstall** on the "Already installed" page to keep it to one click.
 - **macOS:** `.dmg`. The app isn't notarized yet: on first launch, open **System Settings → Privacy & Security** and click **Open Anyway**.
 
 ## Your recipes

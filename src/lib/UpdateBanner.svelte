@@ -8,11 +8,12 @@
   <div class="banner">
     <span class="text">
       <strong>Recipe Collector {s.latest}</strong> is available (you have {s.current}).
+      {#if !isMacPlatform}The app closes, updates and reopens by itself.{/if}
       {#if updates.error}<span class="err">{updates.error}</span>{/if}
     </span>
     {#if s.installer_url}
       <button class="go" disabled={updates.installing} onclick={runInstall}>
-        {updates.installing ? "Downloading…" : isMacPlatform ? "Download update" : "Install and restart"}
+        {updates.installing ? "Downloading…" : isMacPlatform ? "Download update" : "Update now"}
       </button>
     {/if}
     <button class="link" onclick={() => openLink(s.page_url)}>What's new</button>

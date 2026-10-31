@@ -143,7 +143,9 @@ async fn install_update(installer_url: String, checksum_url: Option<String>, app
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new(&path).spawn().map_err(err)?;
+        // Flags understood by Tauri's installer: /UPDATE installs over the old version without
+        // uninstalling it first, /P shows only a progress bar, /R reopens the app when done.
+        std::process::Command::new(&path).args(["/P", "/UPDATE", "/R"]).spawn().map_err(err)?;
         app.exit(0);
     }
     #[cfg(target_os = "macos")]
