@@ -130,11 +130,13 @@ function toUS(v: number, kind: Kind): string {
     return oz ? `${lb} lb ${oz} oz` : `${lb} lb`;
   }
   if (v < 15) {
-    const n = fraction(v / 5);
+    // Spoon sets come in ⅛, ¼, ½ and ¾, so never ⅓ or ⅔ of a spoon.
+    const tsp = v / 5;
+    const n = fraction(tsp < 1 ? Math.max(0.125, Math.round(tsp * 8) / 8) : Math.round(tsp * 4) / 4);
     return `${n} tsp`;
   }
   if (v < 60) {
-    const n = fraction(v / 15);
+    const n = fraction(Math.max(0.25, Math.round((v / 15) * 4) / 4));
     return `${n} tbsp`;
   }
   if (v <= 1900) {
@@ -145,17 +147,67 @@ function toUS(v: number, kind: Kind): string {
   return `${n} ${plural(n, "quart", "quarts")}`;
 }
 
-function convertAmount(value: number, unit: Unit, to: "us" | "metric"): string | null {
+// ---------- dry ingredients ----------
+
+// Grams per US cup (240 ml) for ingredients that metric recipes weigh rather than pour.
+// Checked in order, so specific names come before general ones; null means "a liquid, keep ml".
+const DENSITIES: [string[], number | null][] = [
+  [["buttermilk", "milk", "cream", "water", "stock", "broth", "juice", "oil", "vinegar", "wine", "sauce"], null],
+  [["peanut butter", "almond butter", "nut butter"], 270],
+  [["butter", "margarine", "shortening"], 227],
+  [["almond flour", "almond meal", "ground almonds"], 96],
+  [["coconut flour"], 112],
+  [["whole wheat flour", "wholemeal flour", "whole-wheat flour", "rye flour", "spelt flour"], 113],
+  [["cake flour", "pastry flour"], 115],
+  [["cornstarch", "cornflour", "corn starch", "potato starch", "arrowroot"], 112],
+  [["cornmeal", "polenta", "semolina"], 150],
+  [["flour"], 120],
+  [["brown sugar", "muscovado"], 213],
+  [["powdered sugar", "icing sugar", "confectioners", "confectioner's"], 120],
+  [["coconut sugar"], 160],
+  [["sugar", "caster"], 200],
+  [["honey", "molasses", "treacle", "golden syrup", "corn syrup"], 340],
+  [["maple syrup"], 312],
+  [["cocoa"], 85],
+  [["rolled oats", "oats", "oatmeal"], 90],
+  [["rice"], 190],
+  [["chocolate chips", "chocolate chunks", "chopped chocolate"], 170],
+  [["shredded coconut", "desiccated coconut", "coconut flakes"], 85],
+  [["parmesan", "pecorino"], 100],
+  [["shredded cheese", "grated cheese", "cheddar", "mozzarella"], 113],
+  [["panko"], 50],
+  [["breadcrumbs", "bread crumbs"], 112],
+  [["raisins", "sultanas", "dried cranberries"], 150],
+  [["walnuts", "pecans", "almonds", "hazelnuts", "nuts"], 120],
+  [["yogurt", "yoghurt", "sour cream", "cream cheese", "ricotta"], 240],
+];
+
+/** Grams per cup for the ingredient named right after an amount, or null to keep volumes. */
+export function densityFor(after: string): number | null {
+  // Only look at the ingredient this amount belongs to, not the rest of the sentence.
+  const words = after.toLowerCase().split(/[,;.()]|\band\b|\bor\b|\binto\b|\bwith\b/)[0].slice(0, 60);
+  for (const [names, grams] of DENSITIES) {
+    if (names.some((n) => new RegExp(`(^|[^a-z])${n.replace(/[.*+?^${}()|[\]\\']/g, "\\$&")}`).test(words))) return grams;
+  }
+  return null;
+}
+
+function convertAmount(value: number, unit: Unit, to: "us" | "metric", gramsPerCup: number | null): string | null {
   if (unit.system === "neutral" || unit.system === to) return null;
   const base = value * unit.base;
+  if (gramsPerCup !== null) {
+    // Dry ingredient: cups <-> grams.
+    if (to === "metric" && unit.kind === "volume") return roundMetric((base / 240) * gramsPerCup, "weight");
+    if (to === "us" && unit.kind === "weight") return toUS((base / gramsPerCup) * 240, "volume");
+  }
   return to === "metric" ? roundMetric(base, unit.kind) : toUS(base, unit.kind);
 }
 
-function convertRange(a: number, b: number | null, unit: Unit, to: "us" | "metric"): string | null {
-  const first = convertAmount(a, unit, to);
+function convertRange(a: number, b: number | null, unit: Unit, to: "us" | "metric", gramsPerCup: number | null): string | null {
+  const first = convertAmount(a, unit, to, gramsPerCup);
   if (!first) return null;
   if (b === null) return first;
-  const second = convertAmount(b, unit, to);
+  const second = convertAmount(b, unit, to, gramsPerCup);
   if (!second) return null;
   // "1–2 cups" -> "240–480 ml": keep one unit when both ends share it.
   const [n1, ...u1] = first.split(" ");
@@ -172,12 +224,13 @@ export function convertText(text: string, mode: UnitMode): string {
   const to = mode;
   if (detectSystem([text]) === "mixed") return text;
 
-  let out = text.replace(QTY_RE, (whole, lead: string, a: string, b: string | undefined, name: string) => {
+  let out = text.replace(QTY_RE, (whole, lead: string, a: string, b: string | undefined, name: string, offset: number, all: string) => {
     const unit = unitOf(name);
     const va = parseNumber(a);
     const vb = b ? parseNumber(b) : null;
     if (!unit || va === null || (b && vb === null)) return whole;
-    const conv = convertRange(va, vb, unit, to);
+    const after = all.slice(offset + whole.length);
+    const conv = convertRange(va, vb, unit, to, densityFor(after));
     return conv ? `${lead}${conv}` : whole;
   });
   out = out.replace(TEMP_RE, (whole, deg: string, scale: string) => {
