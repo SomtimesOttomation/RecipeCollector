@@ -4,6 +4,11 @@ All notable changes to Recipe Collector. Each entry is labelled Feature, Bug/Fix
 
 ## Unreleased
 
+## 0.3.2
+
+**Bug/Fix**
+- Windows updates install over the old version in one click, with no uninstall prompts, and reopen the app
+
 ## 0.3.1
 
 **Bug/Fix**
